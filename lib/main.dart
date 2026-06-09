@@ -1,19 +1,17 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-
 import 'package:bengkel/core/constants/app_colors.dart';
 import 'package:bengkel/core/constants/supabase_constants.dart';
-import 'package:bengkel/features/auth/models/user_model.dart'; // Ditambahkan
+import 'package:bengkel/features/auth/models/user_model.dart';
 import 'package:bengkel/features/auth/screens/login_screen.dart';
-import 'package:bengkel/features/customer/screens/customer_dashboard_screen.dart'; // Ditambahkan
+import 'package:bengkel/features/customer/screens/customer_dashboard_screen.dart';
 import 'package:bengkel/features/mechanic/screens/mechanic_dashboard_screen.dart';
-import 'package:bengkel/features/partner/screens/partner_dashboard_screen.dart'; // Ditambahkan
+import 'package:bengkel/features/partner/screens/partner_dashboard_screen.dart';
+import 'package:bengkel/features/admin/screens/main_screen.dart'; // ← TAMBAHAN ADMIN
 
 void main() async {
-  // Wajib dipanggil sebelum inisialisasi layanan cloud
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Menyambungkan aplikasi ke project Supabase kamu
   await Supabase.initialize(
     url: SupabaseConstants.supabaseUrl,
     anonKey: SupabaseConstants.supabaseAnonKey,
@@ -27,7 +25,6 @@ class BengkelApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Mengambil sesi login saat ini dari Supabase Auth secara langsung
     final client = Supabase.instance.client;
     final session = client.auth.currentSession;
 
@@ -48,18 +45,16 @@ class BengkelApp extends StatelessWidget {
           iconTheme: IconThemeData(color: AppColors.textDark),
         ),
       ),
-      // GERBANG LOGIKA PINTU MASUK OTOMATIS DENGAN KONDISI ROLE
       home: session == null
-          ? const LoginScreen() // Jika belum login, ke layar Login
+          ? const LoginScreen()
           : FutureBuilder<Map<String, dynamic>?>(
-              // Jika sudah ada sesi, cek ke tabel 'profiles' di Supabase berdasarkan id user
               future: client
                   .from('profiles')
                   .select()
                   .eq('id', session.user.id)
                   .maybeSingle(),
               builder: (context, snapshot) {
-                // Tampilkan indikator loading saat aplikasi sedang mengecek database
+                // Loading
                 if (snapshot.connectionState == ConnectionState.waiting) {
                   return const Scaffold(
                     body: Center(
@@ -70,23 +65,25 @@ class BengkelApp extends StatelessWidget {
                   );
                 }
 
-                // Jika data profile berhasil diambil
+                // Routing berdasarkan role
                 if (snapshot.hasData && snapshot.data != null) {
                   final user = UserModel.fromJson(snapshot.data!);
 
-                  // Arahkan ke halaman sesuai dengan role masing-masing
-                  if (user.role == 'mechanic') {
-                    return MechanicDashboardScreen(mechanicUserId: user.id);
-                  } else if (user.role == 'customer') {
-                    return CustomerDashboardScreen(user: user);
-                  } else if (user.role == 'partner') {
-                    return PartnerDashboardScreen(
-                      user: user,
-                    ); // <-- Tambahkan baris ini agar Partner tidak terlempar keluar
+                  switch (user.role) {
+                    case 'admin':
+                      return const MainScreen(); // ← ROUTE ADMIN
+                    case 'mechanic':
+                      return MechanicDashboardScreen(mechanicUserId: user.id);
+                    case 'customer':
+                      return CustomerDashboardScreen(user: user);
+                    case 'partner':
+                      return PartnerDashboardScreen(user: user);
+                    default:
+                      return const LoginScreen();
                   }
                 }
 
-                // Jika data profile tidak ditemukan atau error, kembalikan ke LoginScreen demi keamanan
+                // Fallback ke login jika profile tidak ditemukan
                 return const LoginScreen();
               },
             ),
