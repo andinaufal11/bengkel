@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
-import '../../../core/theme/app_theme.dart';
-import '../../../core/utils/responsive.dart';
-import '../../../shared/widgets/bengkel_app_bar.dart';
+import 'package:bengkel/core/constants/app_colors.dart';
+import 'package:bengkel/core/utils/responsive.dart';
+import 'package:bengkel/features/shared_features/widgets/bengkel_app_bar.dart';
 
 class EntitasScreen extends StatefulWidget {
   const EntitasScreen({super.key});

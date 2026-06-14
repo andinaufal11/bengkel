@@ -1,7 +1,14 @@
-import 'package:flutter/material.dart';
-import '../../../core/theme/app_theme.dart';
-import '../../../core/utils/responsive.dart';
-import '../../../shared/widgets/bengkel_app_bar.dart';
+﻿import 'package:flutter/material.dart';
+import 'package:bengkel/core/constants/app_colors.dart';
+import 'package:bengkel/core/utils/responsive.dart';
+import 'package:bengkel/features/shared_features/widgets/bengkel_app_bar.dart';
+import 'package:bengkel/core/service/admin_service.dart';
+
+class _TabData {
+  final String label;
+  final int count;
+  _TabData({required this.label, required this.count});
+}
 
 class VerifikasiScreen extends StatefulWidget {
   const VerifikasiScreen({super.key});
@@ -11,22 +18,41 @@ class VerifikasiScreen extends StatefulWidget {
 }
 
 class _VerifikasiScreenState extends State<VerifikasiScreen> {
+  final AdminService _service = AdminService();
   int _selectedTab = 0;
+  bool _isLoading = true;
+  List<Map<String, dynamic>> _items = [];
 
   final _tabs = [
-    _TabData(label: 'Menunggu', count: 5),
-    _TabData(label: 'Semua', count: 7),
-    _TabData(label: 'Disetujui', count: 1),
-    _TabData(label: 'Ditolak', count: 1),
+    _TabData(label: 'Menunggu', count: 0),
+    _TabData(label: 'Semua', count: 0),
+    _TabData(label: 'Disetujui', count: 0),
+    _TabData(label: 'Ditolak', count: 0),
   ];
 
-  final _items = [
-    _VerifItem(name: 'Bengkel Maju Jaya', owner: 'Hendra Kusuma', city: 'Jakarta Timur', docs: 4, status: 'Menunggu'),
-    _VerifItem(name: 'Auto Kencana Service', owner: 'Ratna Dewi', city: 'Surabaya', docs: 3, status: 'Menunggu'),
-    _VerifItem(name: 'Bengkel Prima Motor', owner: 'Agus Santoso', city: 'Bandung', docs: 4, status: 'Menunggu'),
-    _VerifItem(name: 'Karya Teknik Auto', owner: 'Sari Indah', city: 'Yogyakarta', docs: 5, status: 'Menunggu'),
-    _VerifItem(name: 'Bengkel Nusantara', owner: 'Joko Widodo', city: 'Makassar', docs: 2, status: 'Menunggu'),
-  ];
+  @override
+  void initState() {
+    super.initState();
+    _loadData();
+  }
+
+  Future<void> _loadData() async {
+    setState(() => _isLoading = true);
+    try {
+      final data = await _service.getMitraVerifikasi();
+      setState(() {
+        _items = data;
+        _isLoading = false;
+      });
+    } catch (e) {
+      setState(() => _isLoading = false);
+    }
+  }
+
+  Future<void> _updateStatus(String id, String status) async {
+    await _service.updateStatusMitra(id, status);
+    await _loadData();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -65,7 +91,87 @@ class _VerifikasiScreenState extends State<VerifikasiScreen> {
                 childAspectRatio: 3,
               ),
               itemCount: _items.length,
-              itemBuilder: (_, i) => _VerifCard(item: _items[i]),
+              itemBuilder: (_, i) {
+                final item = _items[i];
+                final status = (item['status'] ?? '').toString();
+                return Container(
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: AppColors.surface,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: AppColors.border),
+                  ),
+                  child: Row(
+                    children: [
+                      Container(
+                        width: 40,
+                        height: 40,
+                        decoration: BoxDecoration(
+                          color: AppColors.primaryLight,
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: const Icon(Icons.store_rounded, color: AppColors.primary, size: 22),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(item['name'] ?? '',
+                                style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
+                            Text(item['owner'] ?? '',
+                                style: const TextStyle(fontSize: 12, color: AppColors.textMuted)),
+                            const SizedBox(height: 4),
+                            Row(
+                              children: [
+                                const Icon(Icons.location_on_rounded, size: 11, color: AppColors.textMuted),
+                                const SizedBox(width: 2),
+                                Text(item['city'] ?? '',
+                                    style: const TextStyle(fontSize: 11, color: AppColors.textMuted)),
+                                const SizedBox(width: 10),
+                                Text('${item['docs'] ?? 0} dok',
+                                    style: const TextStyle(fontSize: 11, color: AppColors.textMuted)),
+                                const SizedBox(width: 8),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                                  decoration: BoxDecoration(
+                                    color: status.toLowerCase().contains('menunggu') ? const Color(0xFFFEF3C7) : AppColors.background,
+                                    borderRadius: BorderRadius.circular(6),
+                                  ),
+                                  child: Text(status.isEmpty ? '—' : status,
+                                      style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w600)),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Column(
+                        children: [
+                          ElevatedButton(
+                            style: ElevatedButton.styleFrom(backgroundColor: AppColors.primary),
+                            onPressed: () async {
+                              final id = item['id'].toString();
+                              await _updateStatus(id, 'disetujui');
+                            },
+                            child: const Text('Setujui', style: TextStyle(color: Colors.white)),
+                          ),
+                          const SizedBox(height: 6),
+                          OutlinedButton(
+                            style: OutlinedButton.styleFrom(foregroundColor: AppColors.danger),
+                            onPressed: () async {
+                              final id = item['id'].toString();
+                              await _updateStatus(id, 'ditolak');
+                            },
+                            child: const Text('Tolak'),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                );
+              },
             ),
           ),
         ),
@@ -141,91 +247,94 @@ class _VerifikasiScreenState extends State<VerifikasiScreen> {
   }
 
   Widget _buildList() {
+    if (_isLoading) {
+      return const Center(child: CircularProgressIndicator());
+    }
     return ListView.separated(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
       itemCount: _items.length,
       separatorBuilder: (_, __) => const SizedBox(height: 10),
-      itemBuilder: (_, i) => _VerifCard(item: _items[i]),
-    );
-  }
-}
-
-class _TabData {
-  final String label;
-  final int count;
-  _TabData({required this.label, required this.count});
-}
-
-class _VerifItem {
-  final String name, owner, city, status;
-  final int docs;
-  _VerifItem({required this.name, required this.owner, required this.city, required this.docs, required this.status});
-}
-
-class _VerifCard extends StatelessWidget {
-  final _VerifItem item;
-  const _VerifCard({required this.item});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: AppColors.border),
-      ),
-      child: Row(
-        children: [
-          Container(
-            width: 40,
-            height: 40,
-            decoration: BoxDecoration(
-              color: AppColors.primaryLight,
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: const Icon(Icons.store_rounded, color: AppColors.primary, size: 22),
+      itemBuilder: (_, i) {
+        final item = _items[i];
+        final status = (item['status'] ?? '').toString();
+        return Container(
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: AppColors.surface,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: AppColors.border),
           ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(item.name,
-                    style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
-                Text(item.owner,
-                    style: const TextStyle(fontSize: 12, color: AppColors.textMuted)),
-                const SizedBox(height: 4),
-                Row(
+          child: Row(
+            children: [
+              Container(
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(
+                  color: AppColors.primaryLight,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: const Icon(Icons.store_rounded, color: AppColors.primary, size: 22),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Icon(Icons.location_on_rounded, size: 11, color: AppColors.textMuted),
-                    const SizedBox(width: 2),
-                    Text(item.city,
-                        style: const TextStyle(fontSize: 11, color: AppColors.textMuted)),
-                    const SizedBox(width: 10),
-                    Text('${item.docs} dok',
-                        style: const TextStyle(fontSize: 11, color: AppColors.textMuted)),
-                    const SizedBox(width: 8),
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFFFEF3C7),
-                        borderRadius: BorderRadius.circular(6),
-                      ),
-                      child: const Text('Menunggu',
-                          style: TextStyle(
-                              fontSize: 10,
-                              color: Color(0xFFD97706),
-                              fontWeight: FontWeight.w600)),
+                    Text(item['name'] ?? '',
+                        style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
+                    Text(item['owner'] ?? '',
+                        style: const TextStyle(fontSize: 12, color: AppColors.textMuted)),
+                    const SizedBox(height: 4),
+                    Row(
+                      children: [
+                        const Icon(Icons.location_on_rounded, size: 11, color: AppColors.textMuted),
+                        const SizedBox(width: 2),
+                        Text(item['city'] ?? '',
+                            style: const TextStyle(fontSize: 11, color: AppColors.textMuted)),
+                        const SizedBox(width: 10),
+                        Text('${item['docs'] ?? 0} dok',
+                            style: const TextStyle(fontSize: 11, color: AppColors.textMuted)),
+                        const SizedBox(width: 8),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: status.toLowerCase().contains('menunggu') ? const Color(0xFFFEF3C7) : AppColors.background,
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: Text(status.isEmpty ? '—' : status,
+                              style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w600)),
+                        ),
+                      ],
                     ),
                   ],
                 ),
-              ],
-            ),
+              ),
+              const SizedBox(width: 8),
+              Column(
+                children: [
+                  ElevatedButton(
+                    style: ElevatedButton.styleFrom(backgroundColor: AppColors.primary),
+                    onPressed: () async {
+                      final id = item['id'].toString();
+                      await _updateStatus(id, 'disetujui');
+                    },
+                    child: const Text('Setujui', style: TextStyle(color: Colors.white)),
+                  ),
+                  const SizedBox(height: 6),
+                  OutlinedButton(
+                    style: OutlinedButton.styleFrom(foregroundColor: AppColors.danger),
+                    onPressed: () async {
+                      final id = item['id'].toString();
+                      await _updateStatus(id, 'ditolak');
+                    },
+                    child: const Text('Tolak'),
+                  ),
+                ],
+              ),
+            ],
           ),
-          const Icon(Icons.chevron_right_rounded, color: AppColors.textMuted),
-        ],
-      ),
+        );
+      },
     );
   }
 }

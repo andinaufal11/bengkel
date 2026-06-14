@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-
+import 'package:bengkel/features/admin/screens/main_screen.dart';
 import 'package:bengkel/core/constants/app_colors.dart';
 import 'package:bengkel/features/auth/repository/auth_repository.dart';
 import 'package:bengkel/features/auth/screens/forgot_password_screen.dart';
@@ -198,12 +198,14 @@ Navigator.pushReplacement(
   context,
   MaterialPageRoute(
     builder: (context) {
-      if (user.role == 'mechanic') {
+      if (user.role == 'admin') {                    // ← TAMBAHKAN INI
+        return const MainScreen();
+      } else if (user.role == 'mechanic') {
         return MechanicDashboardScreen(mechanicUserId: user.id);
       } else if (user.role == 'customer') {
         return CustomerDashboardScreen(user: user);
       } else if (user.role == 'partner') {
-        return PartnerDashboardScreen(user: user); // <-- Tambahkan kondisi ini
+        return PartnerDashboardScreen(user: user);
       } else {
         return RoleHomeScreen(user: user);
       }

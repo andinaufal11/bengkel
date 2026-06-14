@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
-import '../../../core/theme/app_theme.dart';
-import '../../../core/utils/responsive.dart';
-import '../../../shared/widgets/bengkel_app_bar.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:bengkel/core/constants/app_colors.dart';
+import 'package:bengkel/core/utils/responsive.dart';
+import 'package:bengkel/features/shared_features/widgets/bengkel_app_bar.dart';
+import 'package:bengkel/core/service/admin_service.dart';
 
 class DashboardScreen extends StatelessWidget {
   const DashboardScreen({super.key});
@@ -417,19 +419,31 @@ class _ActivityTile extends StatelessWidget {
 
 final dashboardProvider = FutureProvider<Map<String, dynamic>>((ref) async {
   final adminService = AdminService();
-  return await adminService.getDashboardData();
+  return await adminService.getDashboardStats();
 });
 
 // Di dalam widget
 class DashboardWeb extends ConsumerWidget {
+  const DashboardWeb({Key? key}) : super(key: key);
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final dashboardData = ref.watch(dashboardProvider);
 
     return dashboardData.when(
       data: (data) => DashboardContent(data: data),
-      loading: () => CircularProgressIndicator(),
+      loading: () => const CircularProgressIndicator(),
       error: (e, _) => Text('Error: $e'),
     );
+  }
+}
+
+class DashboardContent extends StatelessWidget {
+  final Map<String, dynamic> data;
+  const DashboardContent({required this.data, Key? key}) : super(key: key);
+
+  @override
+  Widget build(BuildContext context) {
+    return Text('Dashboard loaded: ${data.length} items');
   }
 }

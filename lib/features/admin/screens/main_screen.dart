@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
-import '../../../core/theme/app_theme.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:bengkel/features/auth/screens/login_screen.dart';
+import '../../../core/constants/app_theme.dart';
 import '../../../core/utils/responsive.dart';
 import 'dashboard_screen.dart';
 import 'verifikasi_screen.dart';
@@ -54,7 +56,7 @@ class _MainScreenState extends State<MainScreen> {
 
   Widget _buildBottomNav() {
     return Container(
-      decoration: const BoxDecoration(
+      decoration: BoxDecoration(
         color: AppColors.surface,
         border: Border(top: BorderSide(color: AppColors.border)),
       ),
@@ -218,34 +220,70 @@ class _MainScreenState extends State<MainScreen> {
               color: AppColors.background,
               borderRadius: BorderRadius.circular(10),
             ),
-            child: Row(
+            child: Column(
               children: [
-                Container(
-                  width: 32,
-                  height: 32,
-                  decoration: BoxDecoration(
-                    color: AppColors.primary,
-                    borderRadius: BorderRadius.circular(16),
-                  ),
-                  child: const Center(
-                    child: Text('SA',
-                        style: TextStyle(
-                            color: Colors.white,
-                            fontSize: 11,
-                            fontWeight: FontWeight.w700)),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: const [
-                    Text('Super Admin',
-                        style: TextStyle(
-                            fontSize: 12, fontWeight: FontWeight.w600)),
-                    Text('admin@bengkel.com',
-                        style: TextStyle(
-                            fontSize: 10, color: AppColors.textMuted)),
+                Row(
+                  children: [
+                    Container(
+                      width: 32,
+                      height: 32,
+                      decoration: BoxDecoration(
+                        color: AppColors.primary,
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                      child: const Center(
+                        child: Text('SA',
+                            style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 11,
+                                fontWeight: FontWeight.w700)),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: const [
+                        Text('Super Admin',
+                            style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+                        Text('admin@bengkel.com',
+                            style: TextStyle(fontSize: 10, color: AppColors.textMuted)),
+                      ],
+                    ),
                   ],
+                ),
+                const SizedBox(height: 8),
+                // TOMBOL LOGOUT
+                GestureDetector(
+                  onTap: () async {
+                    await Supabase.instance.client.auth.signOut();
+                    if (context.mounted) {
+                      Navigator.pushAndRemoveUntil(
+                        context,
+                        MaterialPageRoute(builder: (_) => const LoginScreen()),
+                        (route) => false,
+                      );
+                    }
+                  },
+                  child: Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.symmetric(vertical: 8),
+                    decoration: BoxDecoration(
+                      color: AppColors.dangerLight,
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: const Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(Icons.logout_rounded, size: 14, color: AppColors.danger),
+                        SizedBox(width: 6),
+                        Text('Logout',
+                            style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                                color: AppColors.danger)),
+                      ],
+                    ),
+                  ),
                 ),
               ],
             ),

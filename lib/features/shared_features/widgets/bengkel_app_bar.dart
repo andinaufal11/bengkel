@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import '../../core/theme/app_theme.dart';
+import 'package:bengkel/core/constants/app_colors.dart';
 
 class BengkelAppBar extends StatelessWidget implements PreferredSizeWidget {
   final String subtitle;
@@ -14,7 +14,7 @@ class BengkelAppBar extends StatelessWidget implements PreferredSizeWidget {
     return Container(
       height: 64,
       padding: const EdgeInsets.symmetric(horizontal: 16),
-      decoration: const BoxDecoration(
+      decoration: BoxDecoration(
         color: AppColors.surface,
         border: Border(bottom: BorderSide(color: AppColors.border)),
       ),
@@ -85,7 +85,7 @@ class BengkelAppBar extends StatelessWidget implements PreferredSizeWidget {
                 child: Container(
                   width: 8,
                   height: 8,
-                  decoration: const BoxDecoration(
+                  decoration: BoxDecoration(
                     color: AppColors.danger,
                     shape: BoxShape.circle,
                   ),

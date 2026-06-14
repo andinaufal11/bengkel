@@ -7,7 +7,7 @@ import 'package:bengkel/features/auth/screens/login_screen.dart';
 import 'package:bengkel/features/customer/screens/customer_dashboard_screen.dart';
 import 'package:bengkel/features/mechanic/screens/mechanic_dashboard_screen.dart';
 import 'package:bengkel/features/partner/screens/partner_dashboard_screen.dart';
-import 'package:bengkel/features/admin/screens/main_screen.dart'; // ← TAMBAHAN ADMIN
+import 'package:bengkel/features/admin/screens/main_screen.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
