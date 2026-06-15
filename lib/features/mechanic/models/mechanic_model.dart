@@ -20,4 +20,5 @@ factory MechanicModel.fromJson(Map<String, dynamic> json) {
     operationalStatus: json['operational_status'] as String? ?? 'Offline',
   );
 }
+
 }

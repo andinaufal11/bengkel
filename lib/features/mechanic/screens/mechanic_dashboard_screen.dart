@@ -7,7 +7,6 @@ import 'package:bengkel/features/mechanic/widgets/status_toggle.dart';
 import 'package:bengkel/features/mechanic/widgets/task_card.dart';
 import 'package:bengkel/features/mechanic/models/task_model.dart';
 import 'package:bengkel/features/auth/screens/login_screen.dart';
-// Import file Bottom Sheet Riwayat yang baru dibuat
 import 'package:bengkel/features/mechanic/widgets/history_detail_bottom_sheet.dart';
 
 class MechanicDashboardScreen extends StatefulWidget {
@@ -23,91 +22,54 @@ class MechanicDashboardScreen extends StatefulWidget {
 class _MechanicDashboardScreenState extends State<MechanicDashboardScreen> {
   final MechanicRepository _repository = MechanicRepository();
   final TextEditingController _reasonController = TextEditingController();
+
+  RealtimeChannel? _taskChannel;
+
   bool _isLoading = false;
   String _currentStatus = 'Available';
   int _currentIndex = 0;
   late final String _mechanicUserId;
   MechanicModel? _mechanicProfile;
-  bool _isProfileLoading = true;
 
-  // 1. DATA DUMMY TUGAS AKTIF & BARU (Versi Asli)
-// 1. DATA DUMMY TUGAS AKTIF & BARU (Diperbarui dengan Waktu & Layanan)
-  final List<TaskModel> _dummyTasks = [
-    TaskModel(id: 'task_001', customerId: 'user_budi', status: 'Accepted', isSos: false, serviceName: 'Ganti Oli Mesin', date: 'Senin, 08 Juni 2026', time: '10:00 WIB'),
-    TaskModel(id: 'task_002', customerId: 'user_andi', status: 'Pending', isSos: true, serviceName: 'Mogok & Pengecekan Aki', date: 'Senin, 08 Juni 2026', time: '11:00 WIB'),
-    TaskModel(id: 'task_003', customerId: 'user_siti', status: 'Pending', isSos: false, serviceName: 'Service Ringan Matic', date: 'Selasa, 09 Juni 2026', time: '14:00 WIB'),
-    TaskModel(id: 'task_004', customerId: 'user_rinto', status: 'Pending', isSos: true, serviceName: 'Tambal Ban Darurat', date: 'Senin, 08 Juni 2026', time: '10:30 WIB'),
-  ];
+  List<TaskModel> _activeTasks = [];
+  List<TaskModel> _historyTasks = [];
+  bool _isTasksLoading = true;
 
-  // 2. DATA DUMMY RIWAYAT TUGAS (Diperkaya untuk Poin 1)
-  final List<Map<String, dynamic>> _completedTasksHistory = [
-    {
-      'id': 'task_old_1',
-      'service': 'Ganti Aki GS Astra',
-      'customer': 'Hendra Wijaya',
-      'date': '05 Juni 2026',
-      'time': '10:30 WIB',
-      'income': 'Rp 150.000',
-      'vehicle': 'Honda Vario 150 (B 4321 SFF)',
-      'status': 'Completed',
-      'address': 'Jl. Kemang Raya No. 12, Jakarta Selatan',
-      'note': 'Ganti aki lancar, tegangan alternator normal 14.2V.',
-    },
-    {
-      'id': 'task_old_2',
-      'service': 'Tambal Ban Tubeless (SOS)',
-      'customer': 'Rina Amelia',
-      'date': '04 Juni 2026',
-      'time': '21:15 WIB',
-      'income': 'Rp 80.000',
-      'vehicle': 'Yamaha NMAX (B 6789 KLS)',
-      'status': 'Completed',
-      'address': 'Pinggir Jalan Tol Dalam Kota Km 14',
-      'note': 'Ban belakang terkena paku payung besar, sukses ditambal dua titik.',
-    },
-    {
-      'id': 'task_old_3',
-      'service': 'Service Ringan + Tune Up',
-      'customer': 'Dedi Kurniawan',
-      'date': '02 Juni 2026',
-      'time': '14:00 WIB',
-      'income': 'Rp 0 (Ditolak)',
-      'vehicle': 'Toyota Avanza (B 1122 VCC)',
-      'status': 'Rejected',
-      'address': 'Gedung Cyber 1 Lt. 3, Kuningan',
-      'reason': 'Peralatan kompresor portable mekanik sedang rusak ringan.',
-    },
-  ];
+  Map<String, dynamic> _stats = {
+    'completedMonthly': 0,
+    'averageRating': 0.0,
+    'totalServices': 0,
+  };
 
   @override
   void initState() {
     super.initState();
-    _mechanicUserId = widget.mechanicUserId ?? Supabase.instance.client.auth.currentUser?.id ?? '';
+    _mechanicUserId =
+        widget.mechanicUserId ??
+        Supabase.instance.client.auth.currentUser?.id ??
+        '';
     _loadMechanicProfile();
+    _fetchTasks();
+    _loadStats();
+    _subscribeToTaskUpdates();
   }
 
+  // ==========================================
+  // FUNGSI PENGAMBILAN DATA (API / SUPABASE)
+  // ==========================================
+
   Future<void> _loadMechanicProfile() async {
-    if (_mechanicUserId.isEmpty) {
-      if (mounted) setState(() => _isProfileLoading = false);
-      return;
-    }
+    if (_mechanicUserId.isEmpty) return;
     try {
       final mechanic = await _repository.getMechanicByUserId(_mechanicUserId);
       if (!mounted) return;
       setState(() {
         _mechanicProfile = mechanic;
         if (mechanic != null) _currentStatus = mechanic.operationalStatus;
-        _isProfileLoading = false;
       });
     } catch (_) {
-      if (mounted) setState(() => _isProfileLoading = false);
+      // profile gagal dimuat, biarkan null
     }
-  }
-
-  @override
-  void dispose() {
-    _reasonController.dispose();
-    super.dispose();
   }
 
   Future<void> _changeStatus(String newStatus) async {
@@ -127,42 +89,110 @@ class _MechanicDashboardScreenState extends State<MechanicDashboardScreen> {
     }
   }
 
-  void _acceptPendingTask(String taskId) {
-    setState(() {
-      final taskIndex = _dummyTasks.indexWhere((task) => task.id == taskId);
-      if (taskIndex != -1) {
-        _dummyTasks[taskIndex] = TaskModel(
-          id: _dummyTasks[taskIndex].id,
-          customerId: _dummyTasks[taskIndex].customerId,
-          status: 'Accepted',
-          isSos: _dummyTasks[taskIndex].isSos,
+  Future<void> _fetchTasks() async {
+    setState(() => _isTasksLoading = true);
+    try {
+      final active = await _repository.getDashboardTasks(_mechanicUserId);
+      final history = await _repository.getHistoryTasks(_mechanicUserId);
+      if (mounted) {
+        setState(() {
+          _activeTasks = active;
+          _historyTasks = history;
+          _isTasksLoading = false;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() => _isTasksLoading = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Gagal memuat tugas: $e'),
+            backgroundColor: AppColors.error,
+          ),
         );
       }
-    });
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Tugas berhasil diterima dan masuk ke Dashboard!'),
-        backgroundColor: AppColors.success,
-      ),
-    );
+    }
   }
 
+  Future<void> _loadStats() async {
+    try {
+      final statsData = await _repository.getMechanicStats(_mechanicUserId);
+      if (mounted) setState(() => _stats = statsData);
+    } catch (e) {
+      debugPrint('Gagal memuat statistik: $e');
+    }
+  }
+
+  Future<void> _refreshAll() async {
+    await Future.wait([_loadMechanicProfile(), _fetchTasks(), _loadStats()]);
+  }
+
+  void _subscribeToTaskUpdates() {
+    _taskChannel = Supabase.instance.client
+        .channel('mechanic-tasks-$_mechanicUserId')
+        .onPostgresChanges(
+          event: PostgresChangeEvent.all,
+          schema: 'public',
+          table: 'home_service_tasks',
+          callback: (_) => _fetchTasks(),
+        )
+        .subscribe();
+  }
+
+  Future<void> _acceptPendingTask(String taskId) async {
+    setState(() => _isLoading = true);
+    try {
+      await _repository.acceptTask(taskId, _mechanicUserId);
+      await _fetchTasks();
+      setState(() => _currentIndex = 0);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Tugas berhasil diterima dan masuk ke Dashboard!'),
+            backgroundColor: AppColors.success,
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Gagal menerima tugas: $e'),
+            backgroundColor: AppColors.error,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  // ==========================================
+  // WIDGET DAN UI
+  // ==========================================
+
   void _showRejectDialog(String taskId) {
+    _reasonController.clear();
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Tolak Tugas', style: TextStyle(fontWeight: FontWeight.bold)),
+        title: const Text('Tolak Tugas',
+            style: TextStyle(fontWeight: FontWeight.bold)),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text('Masukkan alasan penolakan tugas ini:', style: TextStyle(fontSize: 13, color: AppColors.textGrey)),
+            const Text(
+              'Masukkan alasan penolakan tugas ini:',
+              style: TextStyle(fontSize: 13, color: AppColors.textGrey),
+            ),
             const SizedBox(height: 12),
             TextField(
               controller: _reasonController,
               decoration: InputDecoration(
                 hintText: 'Contoh: Ban bocor, peralatan kurang...',
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8)),
               ),
             ),
           ],
@@ -170,61 +200,92 @@ class _MechanicDashboardScreenState extends State<MechanicDashboardScreen> {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
-            child: const Text('Batal', style: TextStyle(color: AppColors.textGrey)),
+            child: const Text('Batal',
+                style: TextStyle(color: AppColors.textGrey)),
           ),
           ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: AppColors.error),
+            style:
+                ElevatedButton.styleFrom(backgroundColor: AppColors.error),
             onPressed: () {
               if (_reasonController.text.trim().isEmpty) {
                 ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Alasan wajib diisi!'), backgroundColor: AppColors.error),
+                  const SnackBar(
+                    content: Text('Alasan wajib diisi!'),
+                    backgroundColor: AppColors.error,
+                  ),
                 );
                 return;
               }
               Navigator.pop(context);
               _executeRejection(taskId);
             },
-            child: const Text('Kirim & Tolak', style: TextStyle(color: Colors.white)),
+            child: const Text('Kirim & Tolak',
+                style: TextStyle(color: Colors.white)),
           ),
         ],
       ),
     );
   }
 
-  void _executeRejection(String taskId) {
-    setState(() {
-      _dummyTasks.removeWhere((task) => task.id == taskId);
-    });
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        icon: const Icon(Icons.alt_route, color: Colors.orange, size: 40),
-        title: const Text('Tugas Dialihkan'),
-        content: Text('Alasan dicatat: "${_reasonController.text}". Tugas ID $taskId sukses dialihkan ke mekanik terdekat kedua.'),
-        actions: [
-          TextButton(
-            onPressed: () {
-              _reasonController.clear();
-              Navigator.pop(context);
-            },
-            child: const Text('Oke'),
+  Future<void> _executeRejection(String taskId) async {
+    setState(() => _isLoading = true);
+    try {
+      await _repository.rejectTask(taskId, _reasonController.text.trim());
+      await _fetchTasks();
+      if (mounted) {
+        showDialog(
+          context: context,
+          builder: (context) => AlertDialog(
+            icon: const Icon(Icons.alt_route, color: Colors.orange, size: 40),
+            title: const Text('Tugas Dialihkan'),
+            content: Text(
+              'Alasan dicatat: "${_reasonController.text}". Tugas telah ditolak dan dialihkan ke mekanik lain.',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () {
+                  _reasonController.clear();
+                  Navigator.pop(context);
+                },
+                child: const Text('Oke'),
+              ),
+            ],
           ),
-        ],
-      ),
-    );
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Gagal menolak tugas: $e'),
+            backgroundColor: AppColors.error,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  @override
+  void dispose() {
+    _reasonController.dispose();
+    _taskChannel?.unsubscribe();
+    super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    final List<Widget> screens = [
-      _buildDashboardContent(),
-      _buildTaskListContent(),
-      _buildHistoryListContent(), 
-    ];
-
     return Scaffold(
       backgroundColor: AppColors.background,
-      body: IndexedStack(index: _currentIndex, children: screens),
+      body: IndexedStack(
+        index: _currentIndex,
+        children: [
+          _buildDashboardContent(),
+          _buildTaskListContent(),
+          _buildHistoryListContent(),
+        ],
+      ),
       bottomNavigationBar: _buildBottomNav(),
     );
   }
@@ -233,43 +294,51 @@ class _MechanicDashboardScreenState extends State<MechanicDashboardScreen> {
   // INDEX 0: DASHBOARD CONTENT
   // ==========================================
   Widget _buildDashboardContent() {
-    return SafeArea(
-      child: SingleChildScrollView(
-        padding: const EdgeInsets.all(20.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            _buildHeader(),
-            const SizedBox(height: 24),
-            _buildStatusCard(),
-            const SizedBox(height: 16),
-            _buildStatusToggle(),
-            const SizedBox(height: 24),
-            _buildStatsGrid(),
-            const SizedBox(height: 24),
-            const Text(
-              'TUGAS BERLANGSUNG',
-              style: TextStyle(
-                fontWeight: FontWeight.bold,
-                fontSize: 14,
-                color: AppColors.textGrey,
+    return RefreshIndicator(
+      color: AppColors.secondary,
+      onRefresh: _refreshAll,
+      child: SafeArea(
+        child: SingleChildScrollView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          padding: const EdgeInsets.all(20.0),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _buildHeader(),
+              const SizedBox(height: 24),
+              _buildStatusCard(),
+              const SizedBox(height: 16),
+              _buildStatusToggle(),
+              const SizedBox(height: 24),
+              _buildStatsGrid(),
+              const SizedBox(height: 24),
+              const Text(
+                'TUGAS BERLANGSUNG',
+                style: TextStyle(
+                  fontWeight: FontWeight.bold,
+                  fontSize: 14,
+                  color: AppColors.textGrey,
+                ),
               ),
-            ),
-            const SizedBox(height: 8),
-            _buildActiveTaskCard(),
-            const SizedBox(height: 24),
-            _buildTargetProgress(),
-          ],
+              const SizedBox(height: 8),
+              _buildActiveTaskCard(),
+            ],
+          ),
         ),
       ),
     );
   }
 
   Widget _buildActiveTaskCard() {
-    try {
-      final activeTask = _dummyTasks.firstWhere((task) => task.status == 'Accepted');
-      return TaskCard(task: activeTask);
-    } catch (_) {
+    if (_isTasksLoading) {
+      return const Center(child: CircularProgressIndicator());
+    }
+
+    final TaskModel? activeTask = _activeTasks
+        .cast<TaskModel?>()
+        .firstWhere((t) => t?.status == 'Accepted', orElse: () => null);
+
+    if (activeTask == null) {
       return Container(
         width: double.infinity,
         padding: const EdgeInsets.all(20),
@@ -286,235 +355,331 @@ class _MechanicDashboardScreenState extends State<MechanicDashboardScreen> {
         ),
       );
     }
+
+    return TaskCard(task: activeTask);
   }
 
   // ==========================================
   // INDEX 1: HALAMAN DAFTAR TUGAS
   // ==========================================
-// ==========================================
-  // INDEX 1: HALAMAN DAFTAR TUGAS (POIN 2: TAMBAH WAKTU & SOS TETAP DI ATAS)
-  // ==========================================
   Widget _buildTaskListContent() {
-    List<TaskModel> sortedTasks = List.from(_dummyTasks);
-    // SOS Prioritas Atas
-    sortedTasks.sort((a, b) => (b.isSos ? 1 : 0).compareTo(a.isSos ? 1 : 0));
-
     return SafeArea(
       child: Scaffold(
         backgroundColor: AppColors.background,
         appBar: AppBar(
-          title: const Text(
-            'Daftar Tugas Masuk',
-            style: TextStyle(fontWeight: FontWeight.bold, color: AppColors.textDark),
-          ),
+          title: const Text('Daftar Tugas Masuk',
+              style: TextStyle(
+                  fontWeight: FontWeight.bold, color: AppColors.textDark)),
           elevation: 0,
           automaticallyImplyLeading: false,
         ),
-        body: sortedTasks.isEmpty
-            ? const Center(
-                child: Text('Belum ada tugas baru untuk Anda.', style: TextStyle(color: AppColors.textGrey)),
-              )
-            : ListView.builder(
-                padding: const EdgeInsets.all(20),
-                itemCount: sortedTasks.length,
-                itemBuilder: (context, index) {
-                  final task = sortedTasks[index];
-                  return Container(
-                    margin: const EdgeInsets.only(bottom: 16),
-                    padding: const EdgeInsets.all(16),
-                    decoration: BoxDecoration(
-                      color: task.isSos ? AppColors.error.withOpacity(0.02) : AppColors.cardBg,
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(
-                        color: task.isSos ? AppColors.error : AppColors.border,
-                        width: task.isSos ? 1.5 : 1,
-                      ),
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        // HEADER LABEL & JARAK
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                              decoration: BoxDecoration(
-                                color: task.isSos ? AppColors.error : AppColors.secondary,
-                                borderRadius: BorderRadius.circular(6),
-                              ),
-                              child: Text(
-                                task.isSos ? '⚠️ EMERGENCY SOS' : '🔧 HOME SERVICE',
-                                style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold),
-                              ),
-                            ),
-                            Text(
-                              task.isSos ? 'Jarak: 1.2 Km (Terdekat)' : 'Jarak: 4.5 Km',
-                              style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: AppColors.textGrey),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 12),
-                        
-                        // NAMA LAYANAN
-                        Text(
-                          task.serviceName, // Diambil dinamis dari model
-                          style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                        ),
-                        const SizedBox(height: 8),
-
-                        // DESAIN BARU: HARI, TANGGAL & JAM BOOKING
-                        Row(
-                          children: [
-                            const Icon(Icons.calendar_today, size: 14, color: AppColors.textGrey),
-                            const SizedBox(width: 6),
-                            Text(
-                              task.date,
-                              style: const TextStyle(fontSize: 12, color: AppColors.textGrey, fontWeight: FontWeight.w500),
-                            ),
-                            const SizedBox(width: 16),
-                            const Icon(Icons.access_time, size: 14, color: AppColors.textGrey),
-                            const SizedBox(width: 6),
-                            Text(
-                              task.time,
-                              style: const TextStyle(fontSize: 12, color: AppColors.textGrey, fontWeight: FontWeight.w500),
-                            ),
-                          ],
-                        ),
-
-                        const SizedBox(height: 16),
-                        
-                        // TOMBOL AKSI
-                        if (task.status == 'Pending')
-                          Row(
-                            children: [
-                              Expanded(
-                                child: OutlinedButton(
-                                  style: OutlinedButton.styleFrom(
-                                    side: const BorderSide(color: AppColors.error),
-                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                                  ),
-                                  onPressed: () => _showRejectDialog(task.id),
-                                  child: const Text('Tolak', style: TextStyle(color: AppColors.error)),
-                                ),
-                              ),
-                              const SizedBox(width: 12),
-                              Expanded(
-                                flex: 2,
-                                child: ElevatedButton(
-                                  style: ElevatedButton.styleFrom(
-                                    backgroundColor: task.isSos ? AppColors.error : AppColors.success,
-                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                                  ),
-                                  onPressed: () => _acceptPendingTask(task.id),
-                                  child: const Text('Terima & Kerjakan', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-                                ),
-                              ),
-                            ],
-                          )
-                        else
-                          Row(
-                            children: const [
-                              Icon(Icons.directions_run, color: AppColors.success, size: 16),
-                              SizedBox(width: 4),
-                              Text('Tugas ini sedang berjalan di halaman utama', style: TextStyle(color: AppColors.success, fontSize: 12, fontWeight: FontWeight.bold)),
-                            ],
-                          ),
-                      ],
-                    ),
-                  );
-                },
-              ),
+        body: RefreshIndicator(
+          color: AppColors.secondary,
+          onRefresh: _refreshAll,
+          child: _buildTaskListBody(),
+        ),
       ),
     );
   }
 
+  Widget _buildTaskListBody() {
+    if (_isTasksLoading) {
+      return const Center(child: CircularProgressIndicator());
+    }
+
+    final sortedTasks = List<TaskModel>.from(_activeTasks)
+      ..sort((a, b) => (b.isSos ? 1 : 0).compareTo(a.isSos ? 1 : 0));
+
+    if (sortedTasks.isEmpty) {
+      return SingleChildScrollView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        child: SizedBox(
+          height: MediaQuery.of(context).size.height * 0.7,
+          child: _buildEmptyState(
+            message: 'Belum ada tugas baru\nuntuk Anda saat ini.',
+            icon: Icons.inbox_outlined,
+          ),
+        ),
+      );
+    }
+
+    return ListView.builder(
+      physics: const AlwaysScrollableScrollPhysics(),
+      padding: const EdgeInsets.all(20),
+      itemCount: sortedTasks.length,
+      itemBuilder: (context, index) {
+        final task = sortedTasks[index];
+        return Container(
+          margin: const EdgeInsets.only(bottom: 16),
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: task.isSos
+                ? AppColors.error.withOpacity(0.02)
+                : AppColors.cardBg,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+              color: task.isSos ? AppColors.error : AppColors.border,
+              width: task.isSos ? 1.5 : 1,
+            ),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 8, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: task.isSos
+                          ? AppColors.error
+                          : AppColors.secondary,
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: Text(
+                      task.isSos ? '⚠️ EMERGENCY SOS' : '🔧 HOME SERVICE',
+                      style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 10,
+                          fontWeight: FontWeight.bold),
+                    ),
+                  ),
+                  // Jarak akan diambil dari data real (task.distance) setelah
+                  // field tersedia dari repository
+                  const Text(
+                    'Jarak: -',
+                    style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.bold,
+                        color: AppColors.textGrey),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              Text(task.serviceName,
+                  style: const TextStyle(
+                      fontSize: 16, fontWeight: FontWeight.bold)),
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  const Icon(Icons.calendar_today,
+                      size: 14, color: AppColors.textGrey),
+                  const SizedBox(width: 6),
+                  Text(task.date,
+                      style: const TextStyle(
+                          fontSize: 12,
+                          color: AppColors.textGrey,
+                          fontWeight: FontWeight.w500)),
+                  const SizedBox(width: 16),
+                  const Icon(Icons.access_time,
+                      size: 14, color: AppColors.textGrey),
+                  const SizedBox(width: 6),
+                  Text(task.time,
+                      style: const TextStyle(
+                          fontSize: 12,
+                          color: AppColors.textGrey,
+                          fontWeight: FontWeight.w500)),
+                ],
+              ),
+              const SizedBox(height: 16),
+              if (task.status == 'Pending')
+                Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton(
+                        style: OutlinedButton.styleFrom(
+                          side: const BorderSide(color: AppColors.error),
+                          shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(8)),
+                        ),
+                        onPressed: () => _showRejectDialog(task.id),
+                        child: const Text('Tolak',
+                            style: TextStyle(color: AppColors.error)),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      flex: 2,
+                      child: ElevatedButton(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: task.isSos
+                              ? AppColors.error
+                              : AppColors.success,
+                          shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(8)),
+                        ),
+                        onPressed: () => _acceptPendingTask(task.id),
+                        child: const Text('Terima & Kerjakan',
+                            style: TextStyle(
+                                color: Colors.white,
+                                fontWeight: FontWeight.bold)),
+                      ),
+                    ),
+                  ],
+                )
+              else
+                const Row(
+                  children: [
+                    Icon(Icons.directions_run,
+                        color: AppColors.success, size: 16),
+                    SizedBox(width: 4),
+                    Text(
+                      'Tugas ini sedang berjalan di halaman utama',
+                      style: TextStyle(
+                          color: AppColors.success,
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold),
+                    ),
+                  ],
+                ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
   // ==========================================
-  // INDEX 2: HALAMAN RIWAYAT TUGAS (DIUBAH UNTUK POIN 1)
+  // INDEX 2: HALAMAN RIWAYAT TUGAS
   // ==========================================
   Widget _buildHistoryListContent() {
     return SafeArea(
       child: Scaffold(
         backgroundColor: AppColors.background,
         appBar: AppBar(
-          title: const Text(
-            'Riwayat Tugas Selesai',
-            style: TextStyle(fontWeight: FontWeight.bold, color: AppColors.textDark),
-          ),
+          title: const Text('Riwayat Tugas Selesai',
+              style: TextStyle(
+                  fontWeight: FontWeight.bold, color: AppColors.textDark)),
           elevation: 0,
           automaticallyImplyLeading: false,
         ),
-        body: ListView.builder(
-          padding: const EdgeInsets.all(20),
-          itemCount: _completedTasksHistory.length,
-          itemBuilder: (context, index) {
-            final history = _completedTasksHistory[index];
-            final isRejected = history['status'] == 'Rejected';
-
-            return Container(
-              margin: const EdgeInsets.only(bottom: 12),
-              child: Material(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(12),
-                child: InkWell(
-                  borderRadius: BorderRadius.circular(12),
-                  onTap: () => _showHistoryDetailBottomSheet(history),
-                  child: Container(
-                    padding: const EdgeInsets.all(16),
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: AppColors.border),
-                    ),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(history['service']!, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
-                              const SizedBox(height: 4),
-                              Text('Pelanggan: ${history['customer']}', style: const TextStyle(color: AppColors.textGrey, fontSize: 13)),
-                              Text('Waktu: ${history['date']} (${history['time']})', style: const TextStyle(color: AppColors.textGrey, fontSize: 11)),
-                            ],
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                          decoration: BoxDecoration(
-                            color: isRejected ? AppColors.error.withOpacity(0.1) : AppColors.success.withOpacity(0.1),
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          child: Text(
-                            history['income']!,
-                            style: TextStyle(fontWeight: FontWeight.bold, color: isRejected ? AppColors.error : AppColors.success, fontSize: 14),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-            );
-          },
+        body: RefreshIndicator(
+          color: AppColors.secondary,
+          onRefresh: _refreshAll,
+          child: _buildHistoryListBody(),
         ),
       ),
     );
   }
 
-  // FUNGSI MEMANGGIL FILE BOTTOM SHEET KUSTOM
+  Widget _buildHistoryListBody() {
+    if (_isTasksLoading) {
+      return const Center(child: CircularProgressIndicator());
+    }
+
+    if (_historyTasks.isEmpty) {
+      return SingleChildScrollView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        child: SizedBox(
+          height: MediaQuery.of(context).size.height * 0.7,
+          child: _buildEmptyState(
+            message: 'Belum ada riwayat tugas.\nSelesaikan tugasmu pertama!',
+            icon: Icons.history_toggle_off,
+          ),
+        ),
+      );
+    }
+
+    return ListView.builder(
+      physics: const AlwaysScrollableScrollPhysics(),
+      padding: const EdgeInsets.all(20),
+      itemCount: _historyTasks.length,
+      itemBuilder: (context, index) {
+        final task = _historyTasks[index];
+        final isRejected = task.status == 'Rejected';
+
+        final String incomeDisplay = isRejected
+            ? 'Rp 0'
+            : (task.income != null && task.income! > 0)
+                ? 'Rp ${task.income!.toStringAsFixed(0)}'
+                : 'Rp ---';
+
+        final Map<String, dynamic> mappedHistoryData = {
+          'id': task.id,
+          'service': task.serviceName,
+          'customer': task.customerName,
+          'date': task.date,
+          'time': task.time,
+          'income': incomeDisplay,
+          'vehicle': task.vehicleInfo ?? 'Data kendaraan belum tersedia',
+          'status': task.status,
+          'address': task.address,
+        };
+
+        return Container(
+          margin: const EdgeInsets.only(bottom: 12),
+          child: Material(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(12),
+            child: InkWell(
+              borderRadius: BorderRadius.circular(12),
+              onTap: () => _showHistoryDetailBottomSheet(mappedHistoryData),
+              child: Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: AppColors.border),
+                ),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(task.serviceName,
+                              style: const TextStyle(
+                                  fontWeight: FontWeight.bold, fontSize: 15)),
+                          const SizedBox(height: 4),
+                          Text('Pelanggan: ${task.customerName}',
+                              style: const TextStyle(
+                                  color: AppColors.textGrey, fontSize: 13)),
+                          Text('Waktu: ${task.date} (${task.time})',
+                              style: const TextStyle(
+                                  color: AppColors.textGrey, fontSize: 11)),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 10, vertical: 6),
+                      decoration: BoxDecoration(
+                        color: isRejected
+                            ? AppColors.error.withOpacity(0.1)
+                            : AppColors.success.withOpacity(0.1),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Text(
+                        incomeDisplay,
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          color: isRejected
+                              ? AppColors.error
+                              : AppColors.success,
+                          fontSize: 14,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
   void _showHistoryDetailBottomSheet(Map<String, dynamic> historyData) {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.white,
       shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (context) {
-        return HistoryDetailBottomSheet(data: historyData);
-      },
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (context) => HistoryDetailBottomSheet(data: historyData),
     );
   }
 
@@ -523,7 +688,8 @@ class _MechanicDashboardScreenState extends State<MechanicDashboardScreen> {
   // ==========================================
   Widget _buildHeader() {
     final displayName = _mechanicProfile?.fullName ?? 'Mekanik';
-    final avatarLetter = displayName.isNotEmpty ? displayName[0].toUpperCase() : 'M';
+    final avatarLetter =
+        displayName.isNotEmpty ? displayName[0].toUpperCase() : 'M';
 
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -532,24 +698,36 @@ class _MechanicDashboardScreenState extends State<MechanicDashboardScreen> {
           children: [
             CircleAvatar(
               backgroundColor: AppColors.secondary,
-              child: Text(avatarLetter, style: const TextStyle(color: Colors.white)),
+              child:
+                  Text(avatarLetter, style: const TextStyle(color: Colors.white)),
             ),
             const SizedBox(width: 12),
             Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(displayName, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                Text(displayName,
+                    style: const TextStyle(
+                        fontWeight: FontWeight.bold, fontSize: 16)),
                 Row(
                   children: [
                     Icon(
                       Icons.circle,
                       size: 8,
-                      color: _currentStatus == 'Available' ? AppColors.success : _currentStatus == 'On-Duty' ? Colors.orange : AppColors.error,
+                      color: _currentStatus == 'Available'
+                          ? AppColors.success
+                          : _currentStatus == 'On-Duty'
+                              ? Colors.orange
+                              : AppColors.error,
                     ),
                     const SizedBox(width: 4),
                     Text(
-                      _currentStatus == 'Available' ? 'Tersedia' : _currentStatus == 'On-Duty' ? 'Bertugas' : 'Offline',
-                      style: const TextStyle(fontSize: 12, color: AppColors.textGrey),
+                      _currentStatus == 'Available'
+                          ? 'Tersedia'
+                          : _currentStatus == 'On-Duty'
+                              ? 'Bertugas'
+                              : 'Offline',
+                      style: const TextStyle(
+                          fontSize: 12, color: AppColors.textGrey),
                     ),
                   ],
                 ),
@@ -565,12 +743,13 @@ class _MechanicDashboardScreenState extends State<MechanicDashboardScreen> {
               if (!context.mounted) return;
               Navigator.pushAndRemoveUntil(
                 context,
-                MaterialPageRoute(builder: (context) => const LoginScreen()),
+                MaterialPageRoute(builder: (_) => const LoginScreen()),
                 (route) => false,
               );
             } catch (e) {
               if (!context.mounted) return;
-              ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Gagal keluar: $e')));
+              ScaffoldMessenger.of(context)
+                  .showSnackBar(SnackBar(content: Text('Gagal keluar: $e')));
             }
           },
         ),
@@ -579,20 +758,38 @@ class _MechanicDashboardScreenState extends State<MechanicDashboardScreen> {
   }
 
   Widget _buildStatusCard() {
-    Color cardColor = _currentStatus == 'Available' ? AppColors.success : _currentStatus == 'On-Duty' ? Colors.orange : AppColors.error;
-    String statusTitle = _currentStatus == 'Available' ? 'Tersedia' : _currentStatus == 'On-Duty' ? 'Bertugas' : 'Offline';
-    String statusSubtitle = _currentStatus == 'Available' ? 'Siap menerima tugas' : _currentStatus == 'On-Duty' ? 'Sedang mengerjakan servis' : 'Tidak menerima tugas';
+    final cardColor = _currentStatus == 'Available'
+        ? AppColors.success
+        : _currentStatus == 'On-Duty'
+            ? Colors.orange
+            : AppColors.error;
+    final statusTitle = _currentStatus == 'Available'
+        ? 'Tersedia'
+        : _currentStatus == 'On-Duty'
+            ? 'Bertugas'
+            : 'Offline';
+    final statusSubtitle = _currentStatus == 'Available'
+        ? 'Siap menerima tugas'
+        : _currentStatus == 'On-Duty'
+            ? 'Sedang mengerjakan servis'
+            : 'Tidak menerima tugas';
 
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(color: cardColor, borderRadius: BorderRadius.circular(16)),
+      decoration: BoxDecoration(
+          color: cardColor, borderRadius: BorderRadius.circular(16)),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const Text('Status Saya', style: TextStyle(color: Colors.white)),
-          Text(statusTitle, style: const TextStyle(color: Colors.white, fontSize: 28, fontWeight: FontWeight.bold)),
-          Text(statusSubtitle, style: const TextStyle(color: Colors.white70)),
+          Text(statusTitle,
+              style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 28,
+                  fontWeight: FontWeight.bold)),
+          Text(statusSubtitle,
+              style: const TextStyle(color: Colors.white70)),
         ],
       ),
     );
@@ -601,79 +798,95 @@ class _MechanicDashboardScreenState extends State<MechanicDashboardScreen> {
   Widget _buildStatusToggle() => StatusToggle(
         currentStatus: _currentStatus,
         isLoading: _isLoading,
-        onStatusChanged: (newStatus) => _changeStatus(newStatus),
+        onStatusChanged: _changeStatus,
       );
 
   Widget _buildStatsGrid() {
+    final rating = _stats['averageRating'] != null
+        ? (_stats['averageRating'] as num).toDouble()
+        : 0.0;
+
     return GridView.count(
       shrinkWrap: true,
       physics: const NeverScrollableScrollPhysics(),
-      crossAxisCount: 2,
-      childAspectRatio: 2.5,
+      crossAxisCount: 3,
+      childAspectRatio: 1.6,
       mainAxisSpacing: 10,
       crossAxisSpacing: 10,
       children: [
-        _statItem('6', 'Selesai Hari Ini', Icons.check_circle_outline),
-        _statItem('4.9', 'Rating', Icons.star_border),
-        _statItem('287', 'Total Servis', Icons.build),
-        _statItem('480k', 'Pendapatan', Icons.show_chart),
+        _statItem(_stats['completedMonthly'].toString(), 'Selesai Bulan Ini',
+            Icons.check_circle_outline),
+        _statItem(rating.toStringAsFixed(1), 'Rating', Icons.star_border),
+        _statItem(
+            _stats['totalServices'].toString(), 'Total Servis', Icons.build),
       ],
     );
   }
 
   Widget _statItem(String value, String label, IconData icon) {
     return Container(
-      padding: const EdgeInsets.all(10),
-      decoration: BoxDecoration(border: Border.all(color: AppColors.border), borderRadius: BorderRadius.circular(12)),
-      child: Row(
+      padding: const EdgeInsets.all(8),
+      decoration: BoxDecoration(
+          border: Border.all(color: AppColors.border),
+          borderRadius: BorderRadius.circular(12)),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(icon, color: AppColors.secondary),
-          const SizedBox(width: 8),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Text(value, style: const TextStyle(fontWeight: FontWeight.bold)),
-              Text(label, style: const TextStyle(fontSize: 10, color: AppColors.textGrey)),
-            ],
-          ),
+          Icon(icon, color: AppColors.secondary, size: 18),
+          const SizedBox(height: 4),
+          Text(value,
+              style: const TextStyle(
+                  fontWeight: FontWeight.bold, fontSize: 13)),
+          Text(label,
+              style:
+                  const TextStyle(fontSize: 9, color: AppColors.textGrey),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis),
         ],
       ),
     );
   }
 
-  Widget _buildTargetProgress() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: const [
-            Text('Target Hari Ini', style: TextStyle(fontWeight: FontWeight.bold)),
-            Text('Rp 480k / Rp 600k', style: TextStyle(fontWeight: FontWeight.bold)),
-          ],
-        ),
-        const SizedBox(height: 12),
-        ClipRRect(
-          borderRadius: BorderRadius.circular(8),
-          child: const LinearProgressIndicator(value: 0.8, backgroundColor: AppColors.border, color: AppColors.secondary, minHeight: 8),
-        ),
-        const SizedBox(height: 8),
-        const Text('80% dari target harian tercapai 🎉', style: TextStyle(fontSize: 12, color: AppColors.textGrey)),
-      ],
+  Widget _buildEmptyState(
+      {required String message, required IconData icon}) {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(icon, size: 64, color: AppColors.border),
+          const SizedBox(height: 16),
+          Text(message,
+              style:
+                  const TextStyle(color: AppColors.textGrey, fontSize: 14),
+              textAlign: TextAlign.center),
+        ],
+      ),
     );
   }
 
   Widget _buildBottomNav() {
+    final pendingCount =
+        _activeTasks.where((t) => t.status == 'Pending').length;
+
     return BottomNavigationBar(
       currentIndex: _currentIndex,
       onTap: (index) => setState(() => _currentIndex = index),
       selectedItemColor: AppColors.secondary,
       unselectedItemColor: AppColors.textGrey,
-      items: const [
-        BottomNavigationBarItem(icon: Icon(Icons.dashboard), label: 'Dashboard'),
-        BottomNavigationBarItem(icon: Icon(Icons.list_alt), label: 'Tugas'),
-        BottomNavigationBarItem(icon: Icon(Icons.history), label: 'Riwayat'),
+      items: [
+        const BottomNavigationBarItem(
+            icon: Icon(Icons.dashboard), label: 'Dashboard'),
+        BottomNavigationBarItem(
+          icon: Badge(
+            isLabelVisible: pendingCount > 0,
+            label: Text('$pendingCount'),
+            child: const Icon(Icons.list_alt),
+          ),
+          label: 'Tugas',
+        ),
+        const BottomNavigationBarItem(
+            icon: Icon(Icons.history), label: 'Riwayat'),
       ],
     );
   }

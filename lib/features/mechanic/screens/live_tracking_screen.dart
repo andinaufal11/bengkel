@@ -3,14 +3,14 @@ import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:bengkel/core/constants/app_colors.dart';
-import 'package:bengkel/features/mechanic/screens/report_submission_screen.dart'; // Nanti kita buat file ini
+import 'package:bengkel/features/mechanic/models/task_model.dart';
+import 'package:bengkel/features/mechanic/screens/report_submission_screen.dart';
 import 'package:bengkel/features/shared_features/chat/chat_screen.dart';
 
-
 class LiveTrackingScreen extends StatefulWidget {
-  final String taskId;
+  final TaskModel task;
 
-  const LiveTrackingScreen({super.key, required this.taskId});
+  const LiveTrackingScreen({super.key, required this.task});
 
   @override
   State<LiveTrackingScreen> createState() => _LiveTrackingScreenState();
@@ -18,22 +18,29 @@ class LiveTrackingScreen extends StatefulWidget {
 
 class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
   final MapController _mapController = MapController();
-  
-  // Koordinat default (Misal: Pusat Jakarta) jika GPS belum didapatkan
+
+  // Posisi default mekanik sebelum GPS ditemukan (Pusat Jakarta)
   LatLng _mechanicPosition = const LatLng(-6.200000, 106.816666);
-  
-  // Koordinat pelanggan (Nanti didapat dari database berdasarkan taskId)
-  final LatLng _customerPosition = const LatLng(-6.210000, 106.820000); 
+
+  // Koordinat pelanggan — diambil dari TaskModel jika tersedia
+  late final LatLng _customerPosition;
 
   bool _isLoadingLocation = true;
 
   @override
   void initState() {
     super.initState();
+
+    // FIX: latitude & longitude sekarang ada di TaskModel
+    // Gunakan koordinat dari task jika ada, fallback ke default
+    _customerPosition =
+        (widget.task.latitude != null && widget.task.longitude != null)
+            ? LatLng(widget.task.latitude!, widget.task.longitude!)
+            : const LatLng(-6.210000, 106.820000);
+
     _determinePosition();
   }
 
-  // Fungsi untuk meminta izin dan mengambil lokasi GPS mekanik
   Future<void> _determinePosition() async {
     bool serviceEnabled;
     LocationPermission permission;
@@ -52,53 +59,57 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
         return;
       }
     }
-    
+
     if (permission == LocationPermission.deniedForever) {
-      _showError('Izin lokasi ditolak permanen. Ubah di pengaturan HP.');
+      _showError('Izin lokasi ditolak permanen. Ubah di Pengaturan HP.');
       return;
     }
 
-    // Ambil lokasi saat ini
-    Position position = await Geolocator.getCurrentPosition(
-      desiredAccuracy: LocationAccuracy.high
-    );
+    try {
+      final position = await Geolocator.getCurrentPosition(
+        desiredAccuracy: LocationAccuracy.high,
+      );
 
-    setState(() {
-      _mechanicPosition = LatLng(position.latitude, position.longitude);
-      _isLoadingLocation = false;
-    });
+      if (mounted) {
+        setState(() {
+          _mechanicPosition = LatLng(position.latitude, position.longitude);
+          _isLoadingLocation = false;
+        });
+        _mapController.move(_mechanicPosition, 16.0);
+      }
 
-    // Pindahkan kamera peta ke lokasi mekanik
-    _mapController.move(_mechanicPosition, 16.0);
-
-    // TODO: [FR-MKN-04] Di sini tempatnya mengirim koordinat secara berkala 
-    // ke Supabase Realtime agar aplikasi Pelanggan bisa melihat pergerakan.
+      // TODO: [FR-MKN-04] Kirim koordinat secara berkala ke Supabase Realtime
+      // agar aplikasi Pelanggan bisa melihat pergerakan mekanik secara live.
+    } catch (e) {
+      _showError('Gagal mendapatkan lokasi: $e');
+    }
   }
 
   void _showError(String message) {
+    if (!mounted) return;
     setState(() => _isLoadingLocation = false);
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text(message), backgroundColor: AppColors.error),
     );
   }
 
-    void _openChat() {
-     // FR-MKN-05: Navigasi ke halaman In-App Chat
-     Navigator.push(
-       context,
-       MaterialPageRoute(
-         builder: (context) => const ChatScreen(customerName: 'Budi Santoso'),
-       ),
-     );
-   }
-
-  void _finishTask() {
-    // Navigasi ke halaman Laporan Servis (FR-MKN-06)
-    // Gunakan push agar mekanik bisa kembali jika salah klik
+  void _openChat() {
     Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (context) => ReportSubmissionScreen(taskId: widget.taskId),
+        builder: (context) => ChatScreen(
+          customerName: widget.task.customerName,
+          taskId: widget.task.id,
+        ),
+      ),
+    );
+  }
+
+  void _finishTask() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => ReportSubmissionScreen(taskId: widget.task.id),
       ),
     );
   }
@@ -109,7 +120,7 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
       backgroundColor: AppColors.background,
       body: Stack(
         children: [
-          // 1. Layer Peta (Map)
+          // ── 1. Layer Peta ──────────────────────────────────────────
           FlutterMap(
             mapController: _mapController,
             options: MapOptions(
@@ -117,7 +128,6 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
               initialZoom: 15.0,
             ),
             children: [
-              // Menggunakan OpenStreetMap (Gratis)
               TileLayer(
                 urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
                 userAgentPackageName: 'com.otoretail.bengkel',
@@ -129,9 +139,13 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
                     point: _customerPosition,
                     width: 50,
                     height: 50,
-                    child: const Icon(Icons.location_on, color: AppColors.error, size: 40),
+                    child: const Icon(
+                      Icons.location_on,
+                      color: AppColors.error,
+                      size: 40,
+                    ),
                   ),
-                  // Marker Lokasi Mekanik (Biru)
+                  // Marker Lokasi Mekanik (Biru) — tampil setelah GPS didapat
                   if (!_isLoadingLocation)
                     Marker(
                       point: _mechanicPosition,
@@ -142,7 +156,11 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
                           color: AppColors.secondary.withOpacity(0.2),
                           shape: BoxShape.circle,
                         ),
-                        child: const Icon(Icons.navigation, color: AppColors.secondary, size: 30),
+                        child: const Icon(
+                          Icons.navigation,
+                          color: AppColors.secondary,
+                          size: 30,
+                        ),
                       ),
                     ),
                 ],
@@ -150,7 +168,7 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
             ],
           ),
 
-          // 2. Tombol Kembali di Pojok Kiri Atas
+          // ── 2. Tombol Kembali ──────────────────────────────────────
           Positioned(
             top: 40,
             left: 16,
@@ -163,7 +181,7 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
             ),
           ),
 
-          // 3. Panel Informasi di Bagian Bawah
+          // ── 3. Panel Informasi Bawah ───────────────────────────────
           Positioned(
             bottom: 0,
             left: 0,
@@ -174,31 +192,52 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
                 color: Colors.white,
                 borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
                 boxShadow: [
-                  BoxShadow(color: Colors.black12, blurRadius: 10, offset: Offset(0, -5))
+                  BoxShadow(
+                    color: Colors.black12,
+                    blurRadius: 10,
+                    offset: Offset(0, -5),
+                  ),
                 ],
               ),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // Indikator Status
+                  // Status & estimasi
                   Row(
                     children: [
                       Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 4,
+                        ),
                         decoration: BoxDecoration(
                           color: AppColors.secondary.withOpacity(0.1),
                           borderRadius: BorderRadius.circular(12),
                         ),
-                        child: const Text('Menuju Lokasi', style: TextStyle(color: AppColors.secondary, fontWeight: FontWeight.bold, fontSize: 12)),
+                        child: const Text(
+                          'Menuju Lokasi',
+                          style: TextStyle(
+                            color: AppColors.secondary,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 12,
+                          ),
+                        ),
                       ),
                       const Spacer(),
-                      const Text('Est. 12 Menit', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                      // TODO: Hitung estimasi waktu secara dinamis
+                      const Text(
+                        'Est. 12 Menit',
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 16,
+                        ),
+                      ),
                     ],
                   ),
                   const SizedBox(height: 16),
-                  
-                  // Info Pelanggan
+
+                  // Info Pelanggan — dari TaskModel
                   Row(
                     children: [
                       const CircleAvatar(
@@ -209,9 +248,22 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
                       Expanded(
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
-                          children: const [
-                            Text('Budi Santoso', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-                            Text('Toyota Avanza 2021', style: TextStyle(color: AppColors.textGrey, fontSize: 13)),
+                          children: [
+                            Text(
+                              widget.task.customerName,
+                              style: const TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 16,
+                              ),
+                            ),
+                            Text(
+                              widget.task.vehicleInfo ??
+                                  'Info kendaraan tidak tersedia',
+                              style: const TextStyle(
+                                color: AppColors.textGrey,
+                                fontSize: 13,
+                              ),
+                            ),
                           ],
                         ),
                       ),
@@ -220,12 +272,13 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
                         onPressed: _openChat,
                         icon: const Icon(Icons.chat_bubble_outline),
                         color: AppColors.secondary,
+                        tooltip: 'Chat dengan pelanggan',
                       ),
                     ],
                   ),
                   const SizedBox(height: 24),
-                  
-                  // Tombol Selesaikan Pekerjaan (Menuju FR-MKN-06)
+
+                  // Tombol Selesaikan Servis (FR-MKN-06)
                   SizedBox(
                     width: double.infinity,
                     child: ElevatedButton(
@@ -233,9 +286,18 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
                       style: ElevatedButton.styleFrom(
                         backgroundColor: AppColors.success,
                         padding: const EdgeInsets.symmetric(vertical: 16),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
                       ),
-                      child: const Text('Selesaikan Servis & Buat Laporan', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
+                      child: const Text(
+                        'Selesaikan Servis & Buat Laporan',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 16,
+                        ),
+                      ),
                     ),
                   ),
                 ],
@@ -243,7 +305,7 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
             ),
           ),
 
-          // 4. Indikator Loading di Tengah jika sedang mencari GPS
+          // ── 4. Loading GPS ─────────────────────────────────────────
           if (_isLoadingLocation)
             const Center(
               child: Card(
