@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:bengkel/core/constants/app_colors.dart';
@@ -18,18 +19,83 @@ class CustomerDashboardScreen extends StatefulWidget {
 
 class _CustomerDashboardScreenState extends State<CustomerDashboardScreen> {
   int _selectedIndex = 0;
-  String _selectedVehicle = "Tambah Kendaraan";
+  String? _selectedVehicleId;
   List<Map<String, dynamic>> _myVehicles = [];
+  List<Map<String, dynamic>> _supabaseBengkels = [];
+  bool _loadingBengkels = false;
 
-  List<String> get _userVehicles {
-    final list = _myVehicles.map((v) => v['name'] as String).toList();
-    list.add("+ Tambah Kendaraan");
-    return list;
+  // Parse detail kendaraan secara aman (handle full schema / fallback JSON)
+  Map<String, dynamic> _parseVehicle(Map<String, dynamic> v) {
+    final nameVal = v['name'] as String? ?? '';
+    if (nameVal.startsWith('{') && nameVal.endsWith('}')) {
+      try {
+        final decoded = jsonDecode(nameVal) as Map<String, dynamic>;
+        return {
+          'id': v['id']?.toString() ?? '',
+          'user_id': v['user_id']?.toString() ?? '',
+          'name': decoded['name'] ?? '${decoded['brand']} ${decoded['type']}',
+          'brand': decoded['brand'] ?? '',
+          'type': decoded['type'] ?? '',
+          'year': decoded['year']?.toString() ?? '',
+          'plate_number': decoded['plate_number'] ?? '',
+          'is_active': decoded['is_active'] == true || v['is_active'] == true,
+        };
+      } catch (_) {}
+    }
+    return {
+      'id': v['id']?.toString() ?? '',
+      'user_id': v['user_id']?.toString() ?? '',
+      'name': nameVal,
+      'brand': v['brand'] as String? ?? '',
+      'type': v['type'] as String? ?? nameVal,
+      'year': v['year']?.toString() ?? '',
+      'plate_number': v['plate_number'] as String? ?? '',
+      'is_active': v['is_active'] == true,
+    };
+  }
+
+  List<Map<String, dynamic>> get _parsedVehicles {
+    return _myVehicles.map((v) => _parseVehicle(v)).toList();
+  }
+
+  Map<String, dynamic>? get _activeVehicle {
+    final list = _parsedVehicles;
+    if (list.isEmpty) return null;
+    final index = list.indexWhere((v) => v['id'] == _selectedVehicleId);
+    if (index >= 0) return list[index];
+    final activeIndex = list.indexWhere((v) => v['is_active'] == true);
+    if (activeIndex >= 0) return list[activeIndex];
+    return list.first;
   }
 
   UserModel? _profileUser;
+  // ignore: unused_field
   bool _isLoadingProfile = false;
   String _selectedOrderStatusFilter = "Semua";
+
+  final List<Map<String, dynamic>> _allPromos = [
+    {
+      "discount": "Diskon 50%",
+      "title": "Ganti Oli Gratis Jasa",
+      "subtitle": "Klaim sekarang →",
+      "colors": [const Color(0xFF3F355A), const Color(0xFFE91E63)],
+      "supports": ["mobil", "motor"]
+    },
+    {
+      "discount": "Diskon 30%",
+      "title": "Tune Up Mobil Hemat",
+      "subtitle": "Klaim sekarang →",
+      "colors": [const Color(0xFF3B82F6), const Color(0xFF1D4ED8)],
+      "supports": ["mobil"]
+    },
+    {
+      "discount": "Diskon 25%",
+      "title": "Upgrade CVT Matic",
+      "subtitle": "Klaim sekarang →",
+      "colors": [const Color(0xFF10B981), const Color(0xFF047857)],
+      "supports": ["motor"]
+    }
+  ];
 
   @override
   void initState() {
@@ -37,6 +103,94 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen> {
     _profileUser = widget.user;
     _fetchProfileFromSupabase();
     _fetchVehicles();
+    _fetchBengkelsFromSupabase();
+  }
+
+  Future<void> _fetchBengkelsFromSupabase() async {
+    if (!mounted) return;
+    setState(() {
+      _loadingBengkels = true;
+    });
+    try {
+      final response = await Supabase.instance.client
+          .from('bengkels')
+          .select()
+          .or('status.eq.active,status.eq.approved');
+      
+      final List<Map<String, dynamic>> fetched = [];
+      for (var b in response) {
+        final specList = (b['specialization'] as List?)?.map((e) => e.toString().toLowerCase()).toList() ?? [];
+        String typeDesc = "Umum";
+        if (specList.contains("mobil") && specList.contains("motor")) {
+          typeDesc = "Mobil & Motor";
+        } else if (specList.contains("mobil")) {
+          typeDesc = "Spesialis Mobil";
+        } else if (specList.contains("motor")) {
+          typeDesc = "Spesialis Motor";
+        }
+
+        fetched.add({
+          "id": b['id']?.toString() ?? '',
+          "name": b['name'] ?? 'Bengkel',
+          "type": typeDesc,
+          "rating": (b['rating'] ?? 4.5).toString(),
+          "reviewsCount": b['review_count'] ?? 0,
+          "distance": "1.2 km",
+          "isOpen": _checkIfOpen(b['open_hour'], b['close_hour']),
+          "isTopRated": (b['rating'] ?? 0.0) >= 4.7,
+          "supports": specList.isEmpty ? ["mobil", "motor"] : specList,
+          "description": b['description'] ?? 'Bengkel terpercaya dengan layanan prima.',
+          "image": b['image_url'] ?? 'https://images.unsplash.com/photo-1486006920555-c77dce18193b?auto=format&fit=crop&w=500',
+          "reviews": [],
+          "open_hour": b['open_hour'] ?? '08:00',
+          "close_hour": b['close_hour'] ?? '17:00',
+          "phone": b['phone'] ?? '',
+        });
+      }
+
+      if (mounted) {
+        setState(() {
+          _supabaseBengkels = fetched;
+        });
+      }
+    } catch (e) {
+      print("🚨 DEBUG ERROR: Gagal fetch bengkels di dashboard: $e");
+    } finally {
+      if (mounted) {
+        setState(() {
+          _loadingBengkels = false;
+        });
+      }
+    }
+  }
+
+  bool _checkIfOpen(String? openHour, String? closeHour) {
+    try {
+      if (openHour == null || closeHour == null) return true;
+      final now = TimeOfDay.now();
+      final openParts = openHour.split(':');
+      final closeParts = closeHour.split(':');
+      if (openParts.length < 2 || closeParts.length < 2) return true;
+      final openMin = int.parse(openParts[0]) * 60 + int.parse(openParts[1]);
+      final closeMin = int.parse(closeParts[0]) * 60 + int.parse(closeParts[1]);
+      final nowMin = now.hour * 60 + now.minute;
+      return nowMin >= openMin && nowMin <= closeMin;
+    } catch (_) {
+      return true;
+    }
+  }
+
+  bool _isBengkelCompatible(Map<String, dynamic> bengkel) {
+    final active = _activeVehicle;
+    if (active == null) return true;
+    final activeName = active['name'] as String? ?? '';
+    final activeIsMotor = _isMotor(activeName);
+    final supports = bengkel['supports'] as List<dynamic>? ?? [];
+    if (activeIsMotor) {
+      return supports.contains("motor");
+    } else {
+      return supports.contains("mobil");
+    }
   }
 
   // Fetch updated profile data from Supabase (for home screen header)
@@ -87,12 +241,16 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen> {
       if (mounted) {
         setState(() {
           _myVehicles = List<Map<String, dynamic>>.from(response);
-          if (_myVehicles.isNotEmpty) {
-            // Check if selected vehicle is still in the fetched list
-            final names = _myVehicles.map((v) => v['name'] as String).toList();
-            if (!names.contains(_selectedVehicle)) {
-              _selectedVehicle = names.first;
+          // Set selected vehicle ID if empty or not valid
+          final list = _parsedVehicles;
+          if (list.isNotEmpty) {
+            final ids = list.map((v) => v['id'] as String).toList();
+            if (_selectedVehicleId == null || !ids.contains(_selectedVehicleId)) {
+              final activeItem = list.firstWhere((v) => v['is_active'] == true, orElse: () => list.first);
+              _selectedVehicleId = activeItem['id'];
             }
+          } else {
+            _selectedVehicleId = null;
           }
         });
       }
@@ -102,14 +260,30 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen> {
   }
 
   // Insert a new vehicle to Supabase under current user
-  Future<void> _addVehicle(String name) async {
+  Future<void> _addVehicle({
+    required String brand,
+    required String type,
+    required String year,
+    required String plateNumber,
+    bool isActive = false,
+  }) async {
     final userId = Supabase.instance.client.auth.currentUser?.id;
     if (userId == null) return;
+    final name = "$brand $type";
+    
+    // Coba insert skema penuh terlebih dahulu
+    final fullData = {
+      'user_id': userId,
+      'brand': brand,
+      'type': type,
+      'year': int.tryParse(year) ?? 0,
+      'plate_number': plateNumber,
+      'is_active': isActive,
+      'name': name,
+    };
+
     try {
-      await Supabase.instance.client.from('vehicles').insert({
-        'user_id': userId,
-        'name': name,
-      });
+      await Supabase.instance.client.from('vehicles').insert(fullData);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -118,71 +292,171 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen> {
           ),
         );
       }
-      _fetchVehicles(); // Refresh the list
+      _fetchVehicles();
     } catch (e) {
-      print("🚨 DEBUG ERROR: Gagal tambah kendaraan ke Supabase: $e");
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text("Gagal menyimpan kendaraan: $e"),
-            backgroundColor: const Color(0xFFEF4444), // Red 500
-          ),
-        );
+      print("🚨 DB WARN: Gagal insert skema penuh, mencoba fallback JSON ke name: $e");
+      try {
+        final fallbackDetails = {
+          'brand': brand,
+          'type': type,
+          'year': year,
+          'plate_number': plateNumber,
+          'is_active': isActive,
+          'name': name,
+        };
+        await Supabase.instance.client.from('vehicles').insert({
+          'user_id': userId,
+          'name': jsonEncode(fallbackDetails),
+        });
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text("Berhasil menambahkan kendaraan (fallback): $name"),
+              backgroundColor: const Color(0xFF10B981),
+            ),
+          );
+        }
+        _fetchVehicles();
+      } catch (err) {
+        print("🚨 DB ERROR: Gagal menyimpan kendaraan (fallback): $err");
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text("Gagal menyimpan kendaraan: $err"),
+              backgroundColor: const Color(0xFFEF4444),
+            ),
+          );
+        }
       }
+    }
+  }
+
+  // Update kendaraan aktif
+  Future<void> _updateActiveVehicle(String vehicleId) async {
+    final userId = Supabase.instance.client.auth.currentUser?.id;
+    if (userId == null) return;
+
+    try {
+      final _ = _parsedVehicles;
+      for (var v in _myVehicles) {
+        final isTarget = v['id'] == vehicleId;
+        final nameVal = v['name'] as String? ?? '';
+        
+        if (nameVal.startsWith('{') && nameVal.endsWith('}')) {
+          try {
+            final decoded = jsonDecode(nameVal) as Map<String, dynamic>;
+            decoded['is_active'] = isTarget;
+            await Supabase.instance.client.from('vehicles').update({
+              'name': jsonEncode(decoded),
+            }).eq('id', v['id']);
+          } catch (_) {}
+        } else {
+          try {
+            await Supabase.instance.client.from('vehicles').update({
+              'is_active': isTarget,
+            }).eq('id', v['id']);
+          } catch (_) {
+            final fallbackDetails = {
+              'brand': v['brand'] ?? '',
+              'type': v['type'] ?? nameVal,
+              'year': v['year']?.toString() ?? '',
+              'plate_number': v['plate_number'] ?? '',
+              'is_active': isTarget,
+              'name': nameVal,
+            };
+            await Supabase.instance.client.from('vehicles').update({
+              'name': jsonEncode(fallbackDetails),
+            }).eq('id', v['id']);
+          }
+        }
+      }
+      setState(() {
+        _selectedVehicleId = vehicleId;
+      });
+      _fetchVehicles();
+    } catch (e) {
+      print("🚨 DEBUG ERROR: Gagal update kendaraan aktif: $e");
     }
   }
 
   // Dialog to type in vehicle name
   void _showAddVehicleDialog() {
-    final TextEditingController controller = TextEditingController();
+    final TextEditingController brandController = TextEditingController();
+    final TextEditingController typeController = TextEditingController();
+    final TextEditingController yearController = TextEditingController();
+    final TextEditingController plateController = TextEditingController();
+
     showDialog(
       context: context,
       builder: (context) {
         return AlertDialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          backgroundColor: const Color(0xFF1E293B),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16), side: const BorderSide(color: Color(0xFF334155))),
           title: const Text(
-            "Tambah Kendaraan",
-            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: Color(0xFF0F172A)),
+            "Tambah Kendaraan Baru",
+            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: Colors.white),
           ),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                "Masukkan nama kendaraan Anda (contoh: Toyota Avanza 2022, Yamaha NMAX 2021).",
-                style: TextStyle(color: Colors.grey.shade600, fontSize: 13),
-              ),
-              const SizedBox(height: 16),
-              TextField(
-                controller: controller,
-                autofocus: true,
-                decoration: InputDecoration(
-                  labelText: "Nama Kendaraan",
-                  hintText: "cth: Toyota Avanza 2021",
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                  focusedBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    borderSide: const BorderSide(color: Color(0xFF3B82F6), width: 2),
-                  ),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  "Isi detail profil kendaraan Anda di bawah ini.",
+                  style: TextStyle(color: Colors.grey.shade400, fontSize: 13),
                 ),
-              ),
-            ],
+                const SizedBox(height: 16),
+                TextField(
+                  controller: brandController,
+                  style: const TextStyle(color: Colors.white),
+                  decoration: _buildInputDecoration("Merek (cth: Toyota, Honda)"),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: typeController,
+                  style: const TextStyle(color: Colors.white),
+                  decoration: _buildInputDecoration("Tipe (cth: Avanza, Vario)"),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: yearController,
+                  style: const TextStyle(color: Colors.white),
+                  keyboardType: TextInputType.number,
+                  decoration: _buildInputDecoration("Tahun (cth: 2021)"),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: plateController,
+                  style: const TextStyle(color: Colors.white),
+                  decoration: _buildInputDecoration("Plat Nomor (cth: D 1234 ABC)"),
+                ),
+              ],
+            ),
           ),
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(context),
-              child: const Text("Batal", style: TextStyle(color: Color(0xFF64748B), fontWeight: FontWeight.bold)),
+              child: const Text("Batal", style: TextStyle(color: Color(0xFF94A3B8), fontWeight: FontWeight.bold)),
             ),
             ElevatedButton(
               onPressed: () {
-                final name = controller.text.trim();
-                if (name.isNotEmpty) {
+                final brand = brandController.text.trim();
+                final type = typeController.text.trim();
+                final year = yearController.text.trim();
+                final plate = plateController.text.trim();
+                if (brand.isNotEmpty && type.isNotEmpty) {
                   Navigator.pop(context);
-                  _addVehicle(name);
+                  _addVehicle(
+                    brand: brand,
+                    type: type,
+                    year: year,
+                    plateNumber: plate,
+                    isActive: _parsedVehicles.isEmpty, // set active if first vehicle
+                  );
                 }
               },
               style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF233246),
+                backgroundColor: const Color(0xFF3B82F6),
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
               ),
               child: const Text("Simpan", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
@@ -193,16 +467,35 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen> {
     );
   }
 
+  InputDecoration _buildInputDecoration(String label) {
+    return InputDecoration(
+      labelText: label,
+      labelStyle: const TextStyle(color: Color(0xFF94A3B8), fontSize: 13),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      filled: true,
+      fillColor: const Color(0xFF0F172A),
+      enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: Color(0xFF334155))),
+      focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: Color(0xFF3B82F6), width: 1.5)),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    final activeVehicleData = _activeVehicle;
     return Scaffold(
-      backgroundColor: _selectedIndex == 4 ? const Color(0xFF111827) : const Color(0xFFF8FAFC),
+      backgroundColor: _selectedIndex == 3 ? const Color(0xFF111827) : const Color(0xFFF8FAFC),
       body: IndexedStack(
         index: _selectedIndex,
         children: [
           _buildHomeTab(),
-          const CustomerSparepartScreen(),
-          const CustomerBengkelScreen(),
+          CustomerSparepartScreen(
+            activeVehicle: activeVehicleData,
+            onTabChanged: (index) {
+              setState(() {
+                _selectedIndex = index;
+              });
+            },
+          ),
           CustomerOrdersScreen(
             selectedStatusFilter: _selectedOrderStatusFilter,
             onFilterChanged: (String newFilter) {
@@ -213,11 +506,15 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen> {
           ),
           CustomerProfileScreen(
             user: widget.user,
+            activeVehicle: activeVehicleData,
             onOrderStatusSelected: (int tabIndex, String statusFilter) {
               setState(() {
-                _selectedIndex = tabIndex;
+                _selectedIndex = tabIndex == 4 ? 3 : (tabIndex == 3 ? 2 : tabIndex);
                 _selectedOrderStatusFilter = statusFilter;
               });
+            },
+            onVehiclesChanged: () {
+              _fetchVehicles();
             },
           ),
         ],
@@ -227,75 +524,210 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen> {
         onTap: (index) {
           setState(() {
             _selectedIndex = index;
-            if (index != 3) {
+            if (index != 2) {
               _selectedOrderStatusFilter = "Semua"; // Reset order filter when changing tabs
             }
           });
           if (index == 0) {
             _fetchProfileFromSupabase(); // Refresh greeting name on home tab
             _fetchVehicles(); // Refresh user vehicles from Supabase
+            _fetchBengkelsFromSupabase(); // Refresh workshops list
           }
         },
         type: BottomNavigationBarType.fixed,
-        selectedItemColor: _selectedIndex == 4 ? const Color(0xFF3B82F6) : AppColors.primary,
+        selectedItemColor: _selectedIndex == 3 ? const Color(0xFF3B82F6) : const Color(0xFF0F172A),
         unselectedItemColor: const Color(0xFF94A3B8), // slate 400
-        backgroundColor: _selectedIndex == 4 ? const Color(0xFF1F2937) : Colors.white,
+        backgroundColor: _selectedIndex == 3 ? const Color(0xFF1F2937) : Colors.white,
         elevation: 10,
         selectedLabelStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 11),
         unselectedLabelStyle: const TextStyle(fontWeight: FontWeight.w600, fontSize: 11),
         items: const [
           BottomNavigationBarItem(
             icon: Icon(Icons.home_outlined),
-            activeIcon: Icon(Icons.home),
-            label: 'Beranda',
+            activeIcon: Icon(Icons.home_rounded),
+            label: 'Home',
           ),
           BottomNavigationBarItem(
             icon: Icon(Icons.shopping_bag_outlined),
-            activeIcon: Icon(Icons.shopping_bag),
-            label: 'Sparepart',
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.build_outlined),
-            activeIcon: Icon(Icons.build),
-            label: 'Bengkel',
+            activeIcon: Icon(Icons.shopping_bag_rounded),
+            label: 'Marketplace',
           ),
           BottomNavigationBarItem(
             icon: Icon(Icons.assignment_outlined),
-            activeIcon: Icon(Icons.assignment),
-            label: 'Pesanan',
+            activeIcon: Icon(Icons.assignment_rounded),
+            label: 'Orders',
           ),
           BottomNavigationBarItem(
             icon: Icon(Icons.person_outline),
-            activeIcon: Icon(Icons.person),
-            label: 'Saya',
+            activeIcon: Icon(Icons.person_rounded),
+            label: 'Profile',
           ),
         ],
       ),
     );
   }
 
+  // Active Vehicle Selector Card helper
+  Widget _buildVehicleSelectorCard(Map<String, dynamic>? activeVehicle) {
+    return PopupMenuButton<Map<String, dynamic>>(
+      initialValue: activeVehicle,
+      onSelected: (Map<String, dynamic> value) {
+        if (value['id'] == "add") {
+          _showAddVehicleDialog();
+        } else {
+          _updateActiveVehicle(value['id']);
+        }
+      },
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+      ),
+      color: Colors.white,
+      offset: const Offset(0, 50),
+      elevation: 4,
+      itemBuilder: (BuildContext context) {
+        final list = _parsedVehicles;
+        final List<PopupMenuEntry<Map<String, dynamic>>> items = list.map((Map<String, dynamic> v) {
+          final isMotorBike = _isMotor(v['name'] as String);
+          return PopupMenuItem<Map<String, dynamic>>(
+            value: v,
+            child: Row(
+              children: [
+                Text(
+                  isMotorBike ? "🏍️" : "🚗",
+                  style: const TextStyle(fontSize: 14),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        v['name'] as String,
+                        style: const TextStyle(
+                          fontWeight: FontWeight.w600,
+                          color: Color(0xFF0F172A),
+                          fontSize: 13,
+                        ),
+                      ),
+                      if ((v['plate_number'] as String).isNotEmpty)
+                        Text(
+                          v['plate_number'] as String,
+                          style: const TextStyle(
+                            color: Color(0xFF64748B),
+                            fontSize: 10,
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+                if (v['id'] == _selectedVehicleId)
+                  const Icon(Icons.check_circle, color: Color(0xFF3B82F6), size: 16),
+              ],
+            ),
+          );
+        }).toList();
+
+        items.add(
+          PopupMenuItem<Map<String, dynamic>>(
+            value: const {'id': 'add', 'name': '+ Tambah Kendaraan'},
+            child: Row(
+              children: const [
+                Text("➕", style: TextStyle(fontSize: 14)),
+                SizedBox(width: 10),
+                Text(
+                  "Tambah Kendaraan",
+                  style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                    color: Color(0xFF3B82F6),
+                    fontSize: 13,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+
+        return items;
+      },
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        decoration: BoxDecoration(
+          color: Colors.white.withOpacity(0.12),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: Colors.white.withOpacity(0.18), width: 1.5),
+        ),
+        child: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: Colors.white.withOpacity(0.2),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Icon(
+                activeVehicle == null
+                    ? Icons.directions_car_filled_rounded
+                    : (_isMotor(activeVehicle['name'] as String)
+                        ? Icons.motorcycle_rounded
+                        : Icons.directions_car_filled_rounded),
+                color: Colors.white,
+                size: 20,
+              ),
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    activeVehicle == null ? "Toyota Avanza" : (activeVehicle['name'] as String),
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 15,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    activeVehicle == null ? "B 1234 XYZ" : (activeVehicle['plate_number'] as String),
+                    style: TextStyle(
+                      color: Colors.white.withOpacity(0.7),
+                      fontSize: 11,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const Icon(
+              Icons.keyboard_arrow_down_rounded,
+              color: Colors.white,
+              size: 20,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   // --- TAB 1: BERANDA ---
   Widget _buildHomeTab() {
-    final displayName = _profileUser?.name ?? widget.user.name;
+    final activeVehicleData = _activeVehicle;
     return SingleChildScrollView(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           // Header Background (Dark slate blue with gradient)
           Container(
-            padding: const EdgeInsets.only(bottom: 30),
+            padding: const EdgeInsets.fromLTRB(20, 20, 20, 32),
             decoration: const BoxDecoration(
               gradient: LinearGradient(
                 colors: [
-                  Color(0xFF2B3A4E), // Top left
-                  Color(0xFF1E2837), // Bottom right
+                  Color(0xFF1E3A8A), // Deep blue
+                  Color(0xFF0F172A), // Slate 900
                 ],
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-              ),
-              borderRadius: BorderRadius.only(
-                bottomLeft: Radius.circular(24),
-                bottomRight: Radius.circular(24),
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
               ),
             ),
             child: SafeArea(
@@ -303,142 +735,88 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // Top Bar
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 12.0),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        // Left: Profile Avatar + Greetings
-                        Row(
+                  // Welcome greeting + Bell icon
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            "Welcome back!",
+                            style: TextStyle(
+                              color: Colors.white.withOpacity(0.8),
+                              fontSize: 14,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          const Text(
+                            "Bengkelin",
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 24,
+                              fontWeight: FontWeight.w900,
+                              letterSpacing: 0.5,
+                            ),
+                          ),
+                        ],
+                      ),
+                      // Bell notification icon with badge
+                      Container(
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: Colors.white.withOpacity(0.1),
+                          shape: BoxShape.circle,
+                        ),
+                        child: Stack(
+                          clipBehavior: Clip.none,
                           children: [
-                            // Avatar with Premium Gradient Border and Background
-                            GestureDetector(
-                              onTap: () {
-                                setState(() {
-                                  _selectedIndex = 4; // Navigate to profile tab
-                                });
-                              },
+                            const Icon(Icons.notifications_none_rounded, color: Colors.white, size: 24),
+                            Positioned(
+                              right: 1,
+                              top: 1,
                               child: Container(
+                                width: 8,
+                                height: 8,
                                 decoration: BoxDecoration(
+                                  color: Colors.red,
                                   shape: BoxShape.circle,
-                                  gradient: const LinearGradient(
-                                    colors: [Color(0xFF3B82F6), Color(0xFF6366F1)],
-                                    begin: Alignment.topLeft,
-                                    end: Alignment.bottomRight,
-                                  ),
-                                  boxShadow: [
-                                    BoxShadow(
-                                      color: Colors.black.withOpacity(0.12),
-                                      blurRadius: 8,
-                                      offset: const Offset(0, 3),
-                                    ),
-                                  ],
-                                ),
-                                child: CircleAvatar(
-                                  radius: 18,
-                                  backgroundColor: Colors.transparent,
-                                  child: Text(
-                                    displayName.isNotEmpty ? displayName[0].toUpperCase() : 'C',
-                                    style: const TextStyle(
-                                      color: Colors.white,
-                                      fontWeight: FontWeight.w800,
-                                      fontSize: 13,
-                                    ),
-                                  ),
+                                  border: Border.all(color: const Color(0xFF0F172A), width: 1.5),
                                 ),
                               ),
-                            ),
-                            const SizedBox(width: 12),
-                            Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Row(
-                                  children: [
-                                    Text(
-                                      _getGreeting(),
-                                      style: const TextStyle(
-                                        color: Colors.white70,
-                                        fontSize: 12,
-                                        fontWeight: FontWeight.w500,
-                                        letterSpacing: 0.2,
-                                      ),
-                                    ),
-                                    const SizedBox(width: 4),
-                                    const Text("👋", style: TextStyle(fontSize: 12)),
-                                  ],
-                                ),
-                                const SizedBox(height: 4),
-                                Text(
-                                  displayName,
-                                  style: const TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 18,
-                                    fontWeight: FontWeight.bold,
-                                    letterSpacing: 0.1,
-                                  ),
-                                ),
-                              ],
                             ),
                           ],
                         ),
-                        // Right: Notification & Cart
-                        Row(
-                          children: [
-                            // Notification Bell with Badge
-                            GestureDetector(
-                              onTap: () {},
-                              child: Container(
-                                padding: const EdgeInsets.all(8),
-                                decoration: BoxDecoration(
-                                  color: Colors.white.withOpacity(0.06),
-                                  shape: BoxShape.circle,
-                                  border: Border.all(color: Colors.white.withOpacity(0.1), width: 1),
-                                ),
-                                child: Stack(
-                                  clipBehavior: Clip.none,
-                                  children: [
-                                    const Icon(Icons.notifications_none_rounded, color: Colors.white, size: 22),
-                                    Positioned(
-                                      right: 1,
-                                      top: 1,
-                                      child: Container(
-                                        width: 8,
-                                        height: 8,
-                                        decoration: BoxDecoration(
-                                          color: const Color(0xFFEF4444), // red 500
-                                          shape: BoxShape.circle,
-                                          border: Border.all(color: const Color(0xFF223042), width: 1.5),
-                                        ),
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 24),
+
+                  // Active Vehicle Selector Card
+                  _buildVehicleSelectorCard(activeVehicleData),
+                  const SizedBox(height: 20),
+
+                  // Search Bar
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Row(
+                      children: const [
+                        Icon(Icons.search_rounded, color: Colors.grey),
+                        SizedBox(width: 12),
+                        Expanded(
+                          child: TextField(
+                            decoration: InputDecoration(
+                              hintText: "Search workshops, services, parts...",
+                              hintStyle: TextStyle(color: Colors.grey, fontSize: 14),
+                              border: InputBorder.none,
+                              isDense: true,
                             ),
-                            const SizedBox(width: 8),
-                            // Shopping Cart
-                            GestureDetector(
-                              onTap: () {
-                                setState(() {
-                                  _selectedIndex = 1; // Navigate to Spareparts / Store tab
-                                });
-                              },
-                              child: Container(
-                                padding: const EdgeInsets.all(8),
-                                decoration: BoxDecoration(
-                                  color: Colors.white.withOpacity(0.06),
-                                  shape: BoxShape.circle,
-                                  border: Border.all(color: Colors.white.withOpacity(0.1), width: 1),
-                                ),
-                                child: const Icon(
-                                  Icons.shopping_cart_outlined,
-                                  color: Colors.white,
-                                  size: 22,
-                                ),
-                              ),
-                            ),
-                          ],
+                          ),
                         ),
                       ],
                     ),
@@ -448,269 +826,320 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen> {
             ),
           ),
           
-          // Overlapping Search Bar
-          Transform.translate(
-            offset: const Offset(0, -25),
-            child: Container(
-              margin: const EdgeInsets.symmetric(horizontal: 20),
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(16),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withOpacity(0.05),
-                    blurRadius: 10,
-                    offset: const Offset(0, 5),
+          const SizedBox(height: 20),
+
+          // 4 Horizontal Quick Actions Cards (Service, Parts, Nearby, Promo)
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20),
+            child: Row(
+              children: [
+                Expanded(
+                  child: _buildQuickActionCard(
+                    Icons.build_outlined,
+                    "Service",
+                    const Color(0xFF3B82F6),
+                    () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => CustomerBengkelScreen(activeVehicle: activeVehicleData),
+                        ),
+                      );
+                    },
                   ),
-                ],
-              ),
-              child: TextField(
-                decoration: InputDecoration(
-                  hintText: "Cari bengkel, sparepart, layanan...",
-                  hintStyle: TextStyle(color: Colors.grey.shade400, fontSize: 14),
-                  prefixIcon: Icon(Icons.search_rounded, color: Colors.grey.shade400, size: 22),
-                  border: InputBorder.none,
                 ),
-              ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: _buildQuickActionCard(
+                    Icons.widgets_outlined,
+                    "Parts",
+                    const Color(0xFF6366F1),
+                    () {
+                      setState(() {
+                        _selectedIndex = 1; // Open Marketplace
+                      });
+                    },
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: _buildQuickActionCard(
+                    Icons.location_on_outlined,
+                    "Nearby",
+                    const Color(0xFF10B981),
+                    () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => CustomerBengkelScreen(activeVehicle: activeVehicleData),
+                        ),
+                      );
+                    },
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: _buildQuickActionCard(
+                    Icons.trending_up_outlined,
+                    "Promo",
+                    const Color(0xFFF59E0B),
+                    () {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text("Menampilkan Promo Hari Ini")),
+                      );
+                    },
+                  ),
+                ),
+              ],
             ),
           ),
           
-          // Compensate for search bar translation
-          const SizedBox(height: 4),
-
-          // Vehicle Selector Pill
+          const SizedBox(height: 28),
+          
+          // Nearby Workshops Header
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 20.0),
-            child: Align(
-              alignment: Alignment.centerLeft,
-              child: PopupMenuButton<String>(
-                initialValue: _selectedVehicle,
-                onSelected: (String value) {
-                  if (value == "+ Tambah Kendaraan") {
-                    _showAddVehicleDialog();
-                  } else {
-                    setState(() {
-                      _selectedVehicle = value;
-                    });
-                  }
-                },
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(16),
+            padding: const EdgeInsets.symmetric(horizontal: 20),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const Text(
+                  "Nearby Workshops",
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: Color(0xFF0F172A)),
                 ),
-                color: Colors.white,
-                offset: const Offset(0, 38),
-                elevation: 4,
-                itemBuilder: (BuildContext context) {
-                  return _userVehicles.map((String vehicle) {
-                    final isAdd = vehicle == "+ Tambah Kendaraan";
-                    return PopupMenuItem<String>(
-                      value: vehicle,
-                      child: Row(
-                        children: [
-                          Text(
-                            isAdd ? "➕" : (_isMotor(vehicle) ? "🏍️" : "🚗"),
-                            style: const TextStyle(fontSize: 14),
-                          ),
-                          const SizedBox(width: 10),
-                          Text(
-                            vehicle,
-                            style: TextStyle(
-                              fontWeight: isAdd ? FontWeight.bold : FontWeight.w500,
-                              color: isAdd ? const Color(0xFF3B82F6) : const Color(0xFF0F172A),
-                              fontSize: 13,
-                            ),
-                          ),
-                        ],
+                GestureDetector(
+                  onTap: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => CustomerBengkelScreen(activeVehicle: activeVehicleData),
                       ),
                     );
-                  }).toList();
-                },
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(20),
-                    border: Border.all(color: const Color(0xFFE2E8F0), width: 1), // slate 200
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withOpacity(0.02),
-                        blurRadius: 6,
-                        offset: const Offset(0, 2),
-                      )
-                    ],
+                  },
+                  child: const Text(
+                    "See All",
+                    style: TextStyle(fontSize: 13, color: Color(0xFF2563EB), fontWeight: FontWeight.bold),
                   ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
-                        _selectedVehicle == "Tambah Kendaraan" || _selectedVehicle == "Pilih Kendaraan"
-                            ? "➕"
-                            : (_isMotor(_selectedVehicle) ? "🏍️" : "🚗"),
-                        style: const TextStyle(fontSize: 13),
-                      ),
-                      const SizedBox(width: 8),
-                      Text(
-                        _selectedVehicle,
-                        style: const TextStyle(
-                          color: Color(0xFF334155), // slate 700
-                          fontWeight: FontWeight.w600,
-                          fontSize: 12,
+                ),
+              ],
+            ),
+          ),
+          
+          const SizedBox(height: 16),
+          
+          // Nearby Workshops list cards matching Image 1
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20),
+            child: _loadingBengkels
+                ? const Center(
+                    child: Padding(
+                      padding: EdgeInsets.symmetric(vertical: 20),
+                      child: CircularProgressIndicator(),
+                    ),
+                  )
+                : _supabaseBengkels.isEmpty
+                    ? Center(
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 20),
+                          child: Text(
+                            "Tidak ada bengkel terdaftar.",
+                            style: TextStyle(color: Colors.grey.shade500, fontSize: 13),
+                          ),
                         ),
+                      )
+                    : Column(
+                        children: _supabaseBengkels
+                            .where((b) => _isBengkelCompatible(b))
+                            .map((b) {
+                          return Padding(
+                            padding: const EdgeInsets.only(bottom: 14),
+                            child: _buildNearbyWorkshopCard(
+                              name: b['name'],
+                              rating: b['rating'],
+                              reviewsCount: b['reviewsCount'].toString(),
+                              distance: b['distance'],
+                              address: b['address'] ?? 'Alamat Bengkel',
+                              imageUrl: b['image'] ?? 'https://images.unsplash.com/photo-1486006920555-c77dce18193b?w=500',
+                              tags: List<String>.from(b['supports'] ?? []),
+                              onTap: () {
+                                Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (context) => CustomerBengkelScreen(
+                                      activeVehicle: activeVehicleData,
+                                      initialBengkel: b,
+                                    ),
+                                  ),
+                                );
+                              },
+                            ),
+                          );
+                        }).toList(),
                       ),
-                      const SizedBox(width: 4),
-                      const Icon(Icons.keyboard_arrow_down_rounded, color: Color(0xFF64748B), size: 16),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-          ),
-
-          const SizedBox(height: 12),
-          
-          // Services Grid
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 20),
-            child: Column(
-              children: [
-                Row(
-                  children: [
-                    Expanded(child: _buildServiceCard(Icons.build_rounded, "Ganti Oli", iconColor: const Color(0xFF6366F1))), // indigo/purple
-                    const SizedBox(width: 12),
-                    Expanded(child: _buildServiceCard(Icons.battery_charging_full_rounded, "Aki &\nListrik", iconColor: const Color(0xFF10B981))), // emerald
-                    const SizedBox(width: 12),
-                    Expanded(child: _buildServiceCard(Icons.ac_unit_rounded, "AC Mobil", iconColor: const Color(0xFF06B6D4))), // cyan
-                    const SizedBox(width: 12),
-                    Expanded(child: _buildServiceCard(Icons.adjust_rounded, "Ban & Velg", iconColor: const Color(0xFFB45309))), // brown/amber
-                  ],
-                ),
-                const SizedBox(height: 12),
-                Row(
-                  children: [
-                    Expanded(child: _buildServiceCard(Icons.handyman_rounded, "Rem &\nKopling", iconColor: const Color(0xFF64748B))), // slate
-                    const SizedBox(width: 12),
-                    Expanded(child: _buildServiceCard(Icons.speed_rounded, "Tune Up", iconColor: const Color(0xFFD946EF))), // fuchsia
-                    const SizedBox(width: 12),
-                    Expanded(child: _buildServiceCard(Icons.local_car_wash_rounded, "Cuci Mobil", iconColor: const Color(0xFF3B82F6))), // blue
-                    const SizedBox(width: 12),
-                    Expanded(child: _buildServiceCard(Icons.bolt_rounded, "Lainnya", iconColor: const Color(0xFFF59E0B))), // amber
-                  ],
-                ),
-              ],
-            ),
-          ),
-          
-          const SizedBox(height: 28),
-          
-          // Promo Hari Ini Header
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 20),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                const Text(
-                  "Promo Hari Ini",
-                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Color(0xFF1E293B)),
-                ),
-                GestureDetector(
-                  onTap: () {},
-                  child: Text(
-                    "Semua >",
-                    style: TextStyle(fontSize: 14, color: Colors.grey.shade600, fontWeight: FontWeight.w500),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          
-          const SizedBox(height: 16),
-          
-          // Promo Cards
-          SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            padding: const EdgeInsets.symmetric(horizontal: 20),
-            child: Row(
-              children: [
-                _buildPromoCard(
-                  gradient: const LinearGradient(
-                    colors: [Color(0xFF3F355A), Color(0xFFE91E63)],
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                  ),
-                  discount: "Diskon 50%",
-                  title: "Ganti Oli Gratis Jasa",
-                  subtitle: "Klaim sekarang →",
-                ),
-                const SizedBox(width: 16),
-                _buildPromoCard(
-                  gradient: const LinearGradient(
-                    colors: [Color(0xFF3B82F6), Color(0xFF1D4ED8)],
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                  ),
-                  discount: "Diskon 30%",
-                  title: "Tune Up Hemat",
-                  subtitle: "Klaim sekarang →",
-                ),
-              ],
-            ),
-          ),
-          
-          const SizedBox(height: 28),
-          
-          // Bengkel Terdekat Header
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 20),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                const Text(
-                  "Bengkel Terdekat",
-                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Color(0xFF1E293B)),
-                ),
-                GestureDetector(
-                  onTap: () {},
-                  child: Text(
-                    "Lihat semua >",
-                    style: TextStyle(fontSize: 14, color: Colors.grey.shade600, fontWeight: FontWeight.w500),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          
-          const SizedBox(height: 16),
-          
-          // Bengkel List Card
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 20),
-            child: Column(
-              children: [
-                _buildBengkelCard(
-                  name: "Bengkel Jaya Motor",
-                  type: "Mobil & Motor",
-                  rating: "4.9",
-                  reviewsCount: "234",
-                  distance: "0.8 km",
-                  isOpen: true,
-                  isTopRated: true,
-                ),
-                const SizedBox(height: 12),
-                _buildBengkelCard(
-                  name: "Central Auto Service",
-                  type: "Spesialis Rem & Oli",
-                  rating: "4.8",
-                  reviewsCount: "118",
-                  distance: "1.5 km",
-                  isOpen: true,
-                  isTopRated: false,
-                ),
-              ],
-            ),
           ),
           const SizedBox(height: 30),
         ],
+      ),
+    );
+  }
+
+  // Quick Action Card Builder
+  Widget _buildQuickActionCard(IconData icon, String label, Color color, VoidCallback onTap) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 14),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: const Color(0xFFE2E8F0)),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.02),
+              blurRadius: 10,
+              offset: const Offset(0, 4),
+            ),
+          ],
+        ),
+        child: Column(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: color.withOpacity(0.1),
+                shape: BoxShape.circle,
+              ),
+              child: Icon(icon, color: color, size: 20),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              label,
+              style: const TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.bold,
+                color: Color(0xFF334155),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // Nearby Workshop Card Builder
+  Widget _buildNearbyWorkshopCard({
+    required String name,
+    required String rating,
+    required String reviewsCount,
+    required String distance,
+    required String address,
+    required String imageUrl,
+    required List<String> tags,
+    required VoidCallback onTap,
+  }) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: const Color(0xFFE2E8F0)),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.02),
+              blurRadius: 8,
+              offset: const Offset(0, 3),
+            ),
+          ],
+        ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            ClipRRect(
+              borderRadius: BorderRadius.circular(12),
+              child: Image.network(
+                imageUrl,
+                width: 76,
+                height: 76,
+                fit: BoxFit.cover,
+                errorBuilder: (context, error, stackTrace) => Container(
+                  width: 76,
+                  height: 76,
+                  color: const Color(0xFFF1F5F9),
+                  child: const Icon(Icons.storefront_rounded, color: Color(0xFF94A3B8), size: 28),
+                ),
+              ),
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    name,
+                    style: const TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 15,
+                      color: Color(0xFF0F172A),
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Row(
+                    children: [
+                      const Icon(Icons.star_rounded, color: Colors.orange, size: 14),
+                      Text(
+                        " $rating ($reviewsCount)  •  $distance",
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: Colors.grey.shade600,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  Row(
+                    children: [
+                      Icon(Icons.location_on_outlined, color: Colors.grey.shade400, size: 12),
+                      const SizedBox(width: 2),
+                      Expanded(
+                        child: Text(
+                          address,
+                          style: TextStyle(
+                            color: Colors.grey.shade500,
+                            fontSize: 11,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 6,
+                    runSpacing: 4,
+                    children: tags.map((t) => Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFF1F5F9),
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: Text(
+                        t,
+                        style: const TextStyle(
+                          color: Color(0xFF475569),
+                          fontSize: 10,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    )).toList(),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -953,13 +1382,5 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen> {
         lower.contains("motor") ||
         lower.contains("vespa") ||
         lower.contains("ninja");
-  }
-
-  String _getGreeting() {
-    final hour = DateTime.now().hour;
-    if (hour < 11) return 'Selamat Pagi';
-    if (hour < 15) return 'Selamat Siang';
-    if (hour < 18) return 'Selamat Sore';
-    return 'Selamat Malam';
   }
 }

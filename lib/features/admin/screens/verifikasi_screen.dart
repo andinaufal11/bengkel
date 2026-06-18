@@ -1,4 +1,4 @@
-﻿import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
 import 'package:bengkel/core/constants/app_colors.dart';
 import 'package:bengkel/core/utils/responsive.dart';
 import 'package:bengkel/features/shared_features/widgets/bengkel_app_bar.dart';
@@ -117,19 +117,19 @@ class _VerifikasiScreenState extends State<VerifikasiScreen> {
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Text(item['name'] ?? '',
+                            Text(item['nama_bengkel'] ?? '',
                                 style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
-                            Text(item['owner'] ?? '',
+                            Text(item['nama_pemilik'] ?? '',
                                 style: const TextStyle(fontSize: 12, color: AppColors.textMuted)),
                             const SizedBox(height: 4),
                             Row(
                               children: [
                                 const Icon(Icons.location_on_rounded, size: 11, color: AppColors.textMuted),
                                 const SizedBox(width: 2),
-                                Text(item['city'] ?? '',
+                                Text(item['kota'] ?? '',
                                     style: const TextStyle(fontSize: 11, color: AppColors.textMuted)),
                                 const SizedBox(width: 10),
-                                Text('${item['docs'] ?? 0} dok',
+                                Text('${item['jumlah_dokumen'] ?? 0} dok',
                                     style: const TextStyle(fontSize: 11, color: AppColors.textMuted)),
                                 const SizedBox(width: 8),
                                 Container(
@@ -280,19 +280,19 @@ class _VerifikasiScreenState extends State<VerifikasiScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(item['name'] ?? '',
+                    Text(item['nama_bengkel'] ?? '',
                         style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
-                    Text(item['owner'] ?? '',
+                    Text(item['nama_pemilik'] ?? '',
                         style: const TextStyle(fontSize: 12, color: AppColors.textMuted)),
                     const SizedBox(height: 4),
                     Row(
                       children: [
                         const Icon(Icons.location_on_rounded, size: 11, color: AppColors.textMuted),
                         const SizedBox(width: 2),
-                        Text(item['city'] ?? '',
+                        Text(item['kota'] ?? '',
                             style: const TextStyle(fontSize: 11, color: AppColors.textMuted)),
                         const SizedBox(width: 10),
-                        Text('${item['docs'] ?? 0} dok',
+                        Text('${item['jumlah_dokumen'] ?? 0} dok',
                             style: const TextStyle(fontSize: 11, color: AppColors.textMuted)),
                         const SizedBox(width: 8),
                         Container(

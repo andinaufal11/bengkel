@@ -9,6 +9,7 @@ import 'entitas_screen.dart';
 import 'komisi_screen.dart';
 import 'master_screen.dart';
 import 'dispute_screen.dart';
+import 'withdrawal_approval_screen.dart';
 
 class MainScreen extends StatefulWidget {
   const MainScreen({super.key});
@@ -27,6 +28,7 @@ class _MainScreenState extends State<MainScreen> {
     _NavItem(icon: Icons.percent_rounded, label: 'Komisi', badge: 0),
     _NavItem(icon: Icons.storage_rounded, label: 'Master', badge: 0),
     _NavItem(icon: Icons.gavel_rounded, label: 'Dispute', badge: 3),
+    _NavItem(icon: Icons.monetization_on_rounded, label: 'Penarikan', badge: 0),
   ];
 
   final List<Widget> _screens = [
@@ -36,6 +38,7 @@ class _MainScreenState extends State<MainScreen> {
     const KomisiScreen(),
     const MasterScreen(),
     const DisputeScreen(),
+    const WithdrawalApprovalScreen(),
   ];
 
   @override

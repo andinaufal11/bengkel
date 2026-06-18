@@ -94,7 +94,7 @@ class AuthRepository {
     return UserModel.fromJson(response);
   }
 
-  // 4. Pendaftaran User (Customer/Partner) [cite: 103]
+  // 4. Pendaftaran User (Customer) [cite: 103]
   Future<AuthResponse> signUpUser({
     required String name,
     required String email,
@@ -105,26 +105,11 @@ class AuthRepository {
     String? address,      // Tambahan opsional
 
   }) async {
-    final authResponse = await _supabase.auth.signUp(
+    return await _supabase.auth.signUp(
       email: email,
       password: password,
       data: {'name': name, 'phone_number': phone, 'role': role, 'workshop_name': workshopName, 'address': address},
     );
-
-    // Simpan ke tabel profiles umum untuk kebutuhan login check
-    if (authResponse.user != null) {
-      try {
-        await _supabase.from('profiles').upsert({
-          'id': authResponse.user!.id,
-          'name': name,
-          'role': role,
-        });
-      } catch (e) {
-        print("🚨 DEBUG ERROR: Gagal menyimpan ke tabel profiles: $e");
-      }
-    }
-
-    return authResponse;
   }
 
   // 5. Sign Out [cite: 105]
@@ -151,7 +136,7 @@ class AuthRepository {
       final mechanicId = authResponse.user!.id;
       
       // Simpan ke tabel profiles umum untuk kebutuhan login check 
-      await _supabase.from('profiles').upsert({
+      await _supabase.from('profiles').insert({
         'id': mechanicId,
         'name': fullName,
         'role': 'mechanic',

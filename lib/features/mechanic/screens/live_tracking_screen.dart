@@ -1,7 +1,9 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:bengkel/core/constants/app_colors.dart';
 import 'package:bengkel/features/mechanic/models/task_model.dart';
 import 'package:bengkel/features/mechanic/screens/report_submission_screen.dart';
@@ -26,19 +28,26 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
   late final LatLng _customerPosition;
 
   bool _isLoadingLocation = true;
+  StreamSubscription<Position>? _positionStream;
+  String _mechanicId = '';
 
   @override
   void initState() {
     super.initState();
+    _mechanicId = Supabase.instance.client.auth.currentUser?.id ?? '';
 
-    // FIX: latitude & longitude sekarang ada di TaskModel
-    // Gunakan koordinat dari task jika ada, fallback ke default
     _customerPosition =
         (widget.task.latitude != null && widget.task.longitude != null)
             ? LatLng(widget.task.latitude!, widget.task.longitude!)
             : const LatLng(-6.210000, 106.820000);
 
     _determinePosition();
+  }
+
+  @override
+  void dispose() {
+    _positionStream?.cancel();
+    super.dispose();
   }
 
   Future<void> _determinePosition() async {
@@ -78,8 +87,8 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
         _mapController.move(_mechanicPosition, 16.0);
       }
 
-      // TODO: [FR-MKN-04] Kirim koordinat secara berkala ke Supabase Realtime
-      // agar aplikasi Pelanggan bisa melihat pergerakan mekanik secara live.
+      // FR-MKN-04: Kirim koordinat ke Supabase Realtime secara live
+      _startBroadcastingLocation();
     } catch (e) {
       _showError('Gagal mendapatkan lokasi: $e');
     }
@@ -91,6 +100,31 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text(message), backgroundColor: AppColors.error),
     );
+  }
+
+  void _startBroadcastingLocation() {
+    _positionStream = Geolocator.getPositionStream(
+      locationSettings: const LocationSettings(
+        accuracy: LocationAccuracy.high,
+        distanceFilter: 10, // update tiap 10 meter
+      ),
+    ).listen((Position position) async {
+      if (mounted) {
+        setState(() {
+          _mechanicPosition = LatLng(position.latitude, position.longitude);
+        });
+        _mapController.move(_mechanicPosition, 15.0);
+      }
+      // Update ke Supabase
+      if (_mechanicId.isNotEmpty) {
+        try {
+          await Supabase.instance.client.from('mechanics').update({
+            'current_latitude': position.latitude,
+            'current_longitude': position.longitude,
+          }).eq('user_id', _mechanicId);
+        } catch (_) {} // GPS update bisa gagal tanpa blocking UI
+      }
+    });
   }
 
   void _openChat() {
@@ -106,10 +140,14 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
   }
 
   void _finishTask() {
+    _positionStream?.cancel(); // Stop GPS broadcast
     Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (context) => ReportSubmissionScreen(taskId: widget.task.id),
+        builder: (context) => ReportSubmissionScreen(
+          taskId: widget.task.id,
+          mechanicId: _mechanicId,
+        ),
       ),
     );
   }

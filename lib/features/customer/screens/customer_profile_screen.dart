@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:bengkel/features/auth/models/user_model.dart';
@@ -5,12 +6,16 @@ import 'package:bengkel/features/auth/screens/login_screen.dart';
 
 class CustomerProfileScreen extends StatefulWidget {
   final UserModel user;
+  final Map<String, dynamic>? activeVehicle;
   final Function(int tabIndex, String statusFilter) onOrderStatusSelected;
+  final VoidCallback onVehiclesChanged;
 
   const CustomerProfileScreen({
     Key? key,
     required this.user,
+    required this.activeVehicle,
     required this.onOrderStatusSelected,
+    required this.onVehiclesChanged,
   }) : super(key: key);
 
   @override
@@ -21,6 +26,199 @@ class _CustomerProfileScreenState extends State<CustomerProfileScreen> {
   UserModel? _profileUser;
   bool _isLoadingProfile = false;
   double _bengkelinPaySaldo = 150000;
+  List<Map<String, dynamic>> _myVehicles = [];
+
+  Map<String, dynamic> _parseVehicle(Map<String, dynamic> v) {
+    final nameVal = v['name'] as String? ?? '';
+    if (nameVal.startsWith('{') && nameVal.endsWith('}')) {
+      try {
+        final decoded = jsonDecode(nameVal) as Map<String, dynamic>;
+        return {
+          'id': v['id']?.toString() ?? '',
+          'user_id': v['user_id']?.toString() ?? '',
+          'name': decoded['name'] ?? '${decoded['brand']} ${decoded['type']}',
+          'brand': decoded['brand'] ?? '',
+          'type': decoded['type'] ?? '',
+          'year': decoded['year']?.toString() ?? '',
+          'plate_number': decoded['plate_number'] ?? '',
+          'is_active': decoded['is_active'] == true || v['is_active'] == true,
+        };
+      } catch (_) {}
+    }
+    return {
+      'id': v['id']?.toString() ?? '',
+      'user_id': v['user_id']?.toString() ?? '',
+      'name': nameVal,
+      'brand': v['brand'] as String? ?? '',
+      'type': v['type'] as String? ?? nameVal,
+      'year': v['year']?.toString() ?? '',
+      'plate_number': v['plate_number'] as String? ?? '',
+      'is_active': v['is_active'] == true,
+    };
+  }
+
+  Future<void> _fetchVehicles() async {
+    final userId = Supabase.instance.client.auth.currentUser?.id;
+    if (userId == null) return;
+    try {
+      final response = await Supabase.instance.client
+          .from('vehicles')
+          .select()
+          .eq('user_id', userId)
+          .order('created_at', ascending: true);
+      if (mounted) {
+        setState(() {
+          _myVehicles = List<Map<String, dynamic>>.from(response);
+        });
+      }
+    } catch (e) {
+      print("🚨 DEBUG ERROR: Gagal fetch profile vehicles: $e");
+    }
+  }
+
+  Future<void> _setActiveVehicle(String vehicleId) async {
+    final userId = Supabase.instance.client.auth.currentUser?.id;
+    if (userId == null) return;
+    try {
+      for (var v in _myVehicles) {
+        final isTarget = v['id'] == vehicleId;
+        final nameVal = v['name'] as String? ?? '';
+        
+        if (nameVal.startsWith('{') && nameVal.endsWith('}')) {
+          try {
+            final decoded = jsonDecode(nameVal) as Map<String, dynamic>;
+            decoded['is_active'] = isTarget;
+            await Supabase.instance.client.from('vehicles').update({
+              'name': jsonEncode(decoded),
+            }).eq('id', v['id']);
+          } catch (_) {}
+        } else {
+          try {
+            await Supabase.instance.client.from('vehicles').update({
+              'is_active': isTarget,
+            }).eq('id', v['id']);
+          } catch (_) {
+            final fallbackDetails = {
+              'brand': v['brand'] ?? '',
+              'type': v['type'] ?? nameVal,
+              'year': v['year']?.toString() ?? '',
+              'plate_number': v['plate_number'] ?? '',
+              'is_active': isTarget,
+              'name': nameVal,
+            };
+            await Supabase.instance.client.from('vehicles').update({
+              'name': jsonEncode(fallbackDetails),
+            }).eq('id', v['id']);
+          }
+        }
+      }
+      _fetchVehicles();
+      widget.onVehiclesChanged();
+    } catch (e) {
+      print("🚨 DEBUG ERROR: Gagal set active vehicle: $e");
+    }
+  }
+
+  Future<void> _addProfileVehicle({
+    required String brand,
+    required String type,
+    required String year,
+    required String plateNumber,
+    bool isActive = false,
+  }) async {
+    final userId = Supabase.instance.client.auth.currentUser?.id;
+    if (userId == null) return;
+    final name = "$brand $type";
+    
+    final fullData = {
+      'user_id': userId,
+      'brand': brand,
+      'type': type,
+      'year': int.tryParse(year) ?? 0,
+      'plate_number': plateNumber,
+      'is_active': isActive,
+      'name': name,
+    };
+
+    try {
+      await Supabase.instance.client.from('vehicles').insert(fullData);
+      _fetchVehicles();
+      widget.onVehiclesChanged();
+    } catch (e) {
+      try {
+        final fallbackDetails = {
+          'brand': brand,
+          'type': type,
+          'year': year,
+          'plate_number': plateNumber,
+          'is_active': isActive,
+          'name': name,
+        };
+        await Supabase.instance.client.from('vehicles').insert({
+          'user_id': userId,
+          'name': jsonEncode(fallbackDetails),
+        });
+        _fetchVehicles();
+        widget.onVehiclesChanged();
+      } catch (err) {
+        print("🚨 DB ERROR: Gagal add profile vehicle fallback: $err");
+      }
+    }
+  }
+
+  Future<void> _updateProfileVehicle({
+    required String vehicleId,
+    required String brand,
+    required String type,
+    required String year,
+    required String plateNumber,
+    required bool isActive,
+  }) async {
+    final name = "$brand $type";
+
+    final fullData = {
+      'brand': brand,
+      'type': type,
+      'year': int.tryParse(year) ?? 0,
+      'plate_number': plateNumber,
+      'is_active': isActive,
+      'name': name,
+    };
+
+    try {
+      await Supabase.instance.client.from('vehicles').update(fullData).eq('id', vehicleId);
+      _fetchVehicles();
+      widget.onVehiclesChanged();
+    } catch (e) {
+      try {
+        final fallbackDetails = {
+          'brand': brand,
+          'type': type,
+          'year': year,
+          'plate_number': plateNumber,
+          'is_active': isActive,
+          'name': name,
+        };
+        await Supabase.instance.client.from('vehicles').update({
+          'name': jsonEncode(fallbackDetails),
+        }).eq('id', vehicleId);
+        _fetchVehicles();
+        widget.onVehiclesChanged();
+      } catch (err) {
+        print("🚨 DB ERROR: Gagal update vehicle fallback: $err");
+      }
+    }
+  }
+
+  Future<void> _deleteProfileVehicle(String vehicleId) async {
+    try {
+      await Supabase.instance.client.from('vehicles').delete().eq('id', vehicleId);
+      _fetchVehicles();
+      widget.onVehiclesChanged();
+    } catch (e) {
+      print("🚨 DEBUG ERROR: Gagal hapus profile vehicle: $e");
+    }
+  }
 
   // Mock Data
   final List<String> _userAddresses = [
@@ -44,6 +242,7 @@ class _CustomerProfileScreenState extends State<CustomerProfileScreen> {
     super.initState();
     _profileUser = widget.user;
     _fetchProfileFromSupabase();
+    _fetchVehicles();
   }
 
   // Fetch updated profile data from Supabase
@@ -363,6 +562,15 @@ class _CustomerProfileScreenState extends State<CustomerProfileScreen> {
                             title: "Edit Profil",
                             subtitle: "Ubah nama, email, dan foto",
                             onTap: _showEditProfileSheet,
+                          ),
+                          _buildMenuDivider(),
+                          _buildProfileMenuItem(
+                            icon: Icons.directions_car_filled_outlined,
+                            title: "Garasi Saya",
+                            subtitle: widget.activeVehicle != null
+                                ? "Kendaraan Aktif: ${widget.activeVehicle!['name']}"
+                                : "Kelola profil kendaraan Anda",
+                            onTap: _showGarageSheet,
                           ),
                           _buildMenuDivider(),
                           _buildProfileMenuItem(
@@ -700,6 +908,444 @@ class _CustomerProfileScreenState extends State<CustomerProfileScreen> {
           ),
         );
       },
+    );
+  }
+
+  void _showGarageSheet() {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: const Color(0xFF1E293B), // slate 800
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setSheetState) {
+            final parsedList = _myVehicles.map((v) => _parseVehicle(v)).toList();
+            return Container(
+              padding: EdgeInsets.only(
+                top: 20,
+                left: 20,
+                right: 20,
+                bottom: MediaQuery.of(context).viewInsets.bottom + 24,
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Center(
+                    child: Container(
+                      width: 40,
+                      height: 4,
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF475569),
+                        borderRadius: BorderRadius.circular(2),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 18),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text(
+                        "Garasi Saya",
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      IconButton(
+                        onPressed: () {
+                          Navigator.pop(context);
+                          _showAddProfileVehicleDialog(setSheetState);
+                        },
+                        icon: const Icon(Icons.add_circle_outline, color: Color(0xFF3B82F6), size: 24),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  if (parsedList.isEmpty)
+                    Center(
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 30.0),
+                        child: Column(
+                          children: [
+                            const Icon(Icons.directions_car_filled_outlined, color: Color(0xFF475569), size: 48),
+                            const SizedBox(height: 12),
+                            Text(
+                              "Belum ada kendaraan terdaftar",
+                              style: TextStyle(color: Colors.grey.shade400, fontSize: 13),
+                            ),
+                          ],
+                        ),
+                      ),
+                    )
+                  else
+                    ConstrainedBox(
+                      constraints: BoxConstraints(
+                        maxHeight: MediaQuery.of(context).size.height * 0.4,
+                      ),
+                      child: ListView.builder(
+                        shrinkWrap: true,
+                        itemCount: parsedList.length,
+                        itemBuilder: (context, index) {
+                          final v = parsedList[index];
+                          final isMotorBike = _isMotor(v['name']);
+                          final isActive = widget.activeVehicle != null && widget.activeVehicle!['id'] == v['id'];
+                          
+                          return Container(
+                            margin: const EdgeInsets.only(bottom: 12),
+                            padding: const EdgeInsets.all(14),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF0F172A),
+                              borderRadius: BorderRadius.circular(16),
+                              border: Border.all(
+                                color: isActive ? const Color(0xFF3B82F6) : const Color(0xFF334155),
+                                width: isActive ? 1.5 : 1,
+                              ),
+                            ),
+                            child: Row(
+                              children: [
+                                Container(
+                                  padding: const EdgeInsets.all(10),
+                                  decoration: BoxDecoration(
+                                    color: isActive ? const Color(0xFF1E3A8A) : const Color(0xFF1E293B),
+                                    shape: BoxShape.circle,
+                                  ),
+                                  child: Text(
+                                    isMotorBike ? "🏍️" : "🚗",
+                                    style: const TextStyle(fontSize: 18),
+                                  ),
+                                ),
+                                const SizedBox(width: 14),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        v['name'],
+                                        style: const TextStyle(
+                                          color: Colors.white,
+                                          fontWeight: FontWeight.bold,
+                                          fontSize: 14,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 4),
+                                      Text(
+                                        "${v['plate_number']} • ${v['year']}",
+                                        style: TextStyle(
+                                          color: Colors.grey.shade400,
+                                          fontSize: 12,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 6),
+                                      if (isActive)
+                                        Container(
+                                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                          decoration: BoxDecoration(
+                                            color: const Color(0xFF065F46),
+                                            borderRadius: BorderRadius.circular(20),
+                                          ),
+                                          child: const Text(
+                                            "Kendaraan Aktif",
+                                            style: TextStyle(color: Color(0xFF34D399), fontSize: 9, fontWeight: FontWeight.bold),
+                                          ),
+                                        )
+                                      else
+                                        GestureDetector(
+                                          onTap: () async {
+                                            await _setActiveVehicle(v['id']);
+                                            setSheetState(() {});
+                                          },
+                                          child: const Text(
+                                            "Jadikan Aktif",
+                                            style: TextStyle(
+                                              color: Color(0xFF3B82F6),
+                                              fontSize: 12,
+                                              fontWeight: FontWeight.bold,
+                                              decoration: TextDecoration.underline,
+                                            ),
+                                          ),
+                                        ),
+                                    ],
+                                  ),
+                                ),
+                                Row(
+                                  children: [
+                                    IconButton(
+                                      icon: const Icon(Icons.edit_outlined, color: Color(0xFF94A3B8), size: 20),
+                                      onPressed: () {
+                                        Navigator.pop(context);
+                                        _showEditProfileVehicleDialog(v, setSheetState);
+                                      },
+                                    ),
+                                    IconButton(
+                                      icon: const Icon(Icons.delete_outline, color: Color(0xFFEF4444), size: 20),
+                                      onPressed: () async {
+                                        final confirm = await _showConfirmDeleteDialog(v['name']);
+                                        if (confirm == true) {
+                                          await _deleteProfileVehicle(v['id']);
+                                          setSheetState(() {});
+                                        }
+                                      },
+                                    ),
+                                  ],
+                                ),
+                              ],
+                            ),
+                          );
+                        },
+                      ),
+                    ),
+                  const SizedBox(height: 14),
+                  SizedBox(
+                    width: double.infinity,
+                    height: 46,
+                    child: ElevatedButton.icon(
+                      onPressed: () {
+                        Navigator.pop(context);
+                        _showAddProfileVehicleDialog(setSheetState);
+                      },
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF3B82F6),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      ),
+                      icon: const Icon(Icons.add, color: Colors.white, size: 18),
+                      label: const Text("Tambah Kendaraan", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  bool _isMotor(String name) {
+    final lower = name.toLowerCase();
+    return lower.contains("honda beat") ||
+        lower.contains("beat") ||
+        lower.contains("vario") ||
+        lower.contains("mio") ||
+        lower.contains("nmax") ||
+        lower.contains("scoopy") ||
+        lower.contains("yamaha") ||
+        lower.contains("motor") ||
+        lower.contains("vespa") ||
+        lower.contains("ninja");
+  }
+
+  Future<bool?> _showConfirmDeleteDialog(String name) {
+    return showDialog<bool>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          backgroundColor: const Color(0xFF1E293B),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: const Text("Hapus Kendaraan?", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+          content: Text("Apakah Anda yakin ingin menghapus kendaraan $name dari garasi?", style: const TextStyle(color: Color(0xFFCBD5E1))),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text("Batal", style: TextStyle(color: Color(0xFF94A3B8))),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.pop(context, true),
+              style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFEF4444)),
+              child: const Text("Hapus", style: TextStyle(color: Colors.white)),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  void _showAddProfileVehicleDialog(StateSetter setSheetState) {
+    final brandController = TextEditingController();
+    final typeController = TextEditingController();
+    final yearController = TextEditingController();
+    final plateController = TextEditingController();
+
+    showDialog(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          backgroundColor: const Color(0xFF1E293B),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16), side: const BorderSide(color: Color(0xFF334155))),
+          title: const Text(
+            "Tambah Kendaraan Baru",
+            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: Colors.white),
+          ),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                TextField(
+                  controller: brandController,
+                  style: const TextStyle(color: Colors.white),
+                  decoration: _buildProfileInputDecoration("Merek (cth: Toyota, Honda)"),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: typeController,
+                  style: const TextStyle(color: Colors.white),
+                  decoration: _buildProfileInputDecoration("Tipe (cth: Avanza, Beat)"),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: yearController,
+                  style: const TextStyle(color: Colors.white),
+                  keyboardType: TextInputType.number,
+                  decoration: _buildProfileInputDecoration("Tahun (cth: 2021)"),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: plateController,
+                  style: const TextStyle(color: Colors.white),
+                  decoration: _buildProfileInputDecoration("Plat Nomor (cth: D 1234 ABC)"),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () {
+                Navigator.pop(context);
+                _showGarageSheet();
+              },
+              child: const Text("Batal", style: TextStyle(color: Color(0xFF94A3B8), fontWeight: FontWeight.bold)),
+            ),
+            ElevatedButton(
+              onPressed: () async {
+                final brand = brandController.text.trim();
+                final type = typeController.text.trim();
+                final year = yearController.text.trim();
+                final plate = plateController.text.trim();
+                if (brand.isNotEmpty && type.isNotEmpty) {
+                  Navigator.pop(context);
+                  await _addProfileVehicle(
+                    brand: brand,
+                    type: type,
+                    year: year,
+                    plateNumber: plate,
+                    isActive: _myVehicles.isEmpty,
+                  );
+                  _showGarageSheet();
+                }
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF3B82F6),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+              ),
+              child: const Text("Simpan", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  void _showEditProfileVehicleDialog(Map<String, dynamic> v, StateSetter setSheetState) {
+    final brandController = TextEditingController(text: v['brand']);
+    final typeController = TextEditingController(text: v['type']);
+    final yearController = TextEditingController(text: v['year']);
+    final plateController = TextEditingController(text: v['plate_number']);
+
+    showDialog(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          backgroundColor: const Color(0xFF1E293B),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16), side: const BorderSide(color: Color(0xFF334155))),
+          title: const Text(
+            "Ubah Detail Kendaraan",
+            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: Colors.white),
+          ),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                TextField(
+                  controller: brandController,
+                  style: const TextStyle(color: Colors.white),
+                  decoration: _buildProfileInputDecoration("Merek"),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: typeController,
+                  style: const TextStyle(color: Colors.white),
+                  decoration: _buildProfileInputDecoration("Tipe"),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: yearController,
+                  style: const TextStyle(color: Colors.white),
+                  keyboardType: TextInputType.number,
+                  decoration: _buildProfileInputDecoration("Tahun"),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: plateController,
+                  style: const TextStyle(color: Colors.white),
+                  decoration: _buildProfileInputDecoration("Plat Nomor"),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () {
+                Navigator.pop(context);
+                _showGarageSheet();
+              },
+              child: const Text("Batal", style: TextStyle(color: Color(0xFF94A3B8), fontWeight: FontWeight.bold)),
+            ),
+            ElevatedButton(
+              onPressed: () async {
+                final brand = brandController.text.trim();
+                final type = typeController.text.trim();
+                final year = yearController.text.trim();
+                final plate = plateController.text.trim();
+                if (brand.isNotEmpty && type.isNotEmpty) {
+                  Navigator.pop(context);
+                  await _updateProfileVehicle(
+                    vehicleId: v['id'],
+                    brand: brand,
+                    type: type,
+                    year: year,
+                    plateNumber: plate,
+                    isActive: v['is_active'] == true,
+                  );
+                  _showGarageSheet();
+                }
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF3B82F6),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+              ),
+              child: const Text("Simpan", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  InputDecoration _buildProfileInputDecoration(String label) {
+    return InputDecoration(
+      labelText: label,
+      labelStyle: const TextStyle(color: Color(0xFF94A3B8), fontSize: 13),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      filled: true,
+      fillColor: const Color(0xFF0F172A),
+      enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: Color(0xFF334155))),
+      focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: Color(0xFF3B82F6), width: 1.5)),
     );
   }
 

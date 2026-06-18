@@ -70,6 +70,14 @@ class AdminService {
       'updated_at': DateTime.now().toIso8601String(),
     }).eq('id', id);
 
+    // Also update status in public.bengkels
+    final isApproved = status == 'disetujui';
+    await _client.from('bengkels').update({
+      'status': isApproved ? 'approved' : 'rejected',
+      'is_verified': isApproved,
+      'updated_at': DateTime.now().toIso8601String(),
+    }).eq('owner_id', id);
+
     // Log aktivitas
     await _client.from('activity_logs').insert({
       'pesan': 'Status mitra diperbarui menjadi $status',
@@ -192,6 +200,32 @@ class AdminService {
     await _client.from('activity_logs').insert({
       'pesan': 'Dispute diperbarui menjadi $status',
       'tipe': 'dispute',
+    });
+  }
+
+  // =============================================
+  // WITHDRAWALS (PENARIKAN DANA MITRA)
+  // =============================================
+
+  Future<List<Map<String, dynamic>>> getWithdrawals({String? status}) async {
+    var query = _client.from('withdrawals').select('*, bengkels(name)');
+    if (status != null && status != 'semua') {
+      query = query.eq('status', status);
+    }
+    final response = await query.order('created_at', ascending: false);
+    return List<Map<String, dynamic>>.from(response);
+  }
+
+  Future<void> updateWithdrawalStatus(String id, String status, {String? reason}) async {
+    await _client.from('withdrawals').update({
+      'status': status,
+      'rejection_reason': reason,
+      'processed_at': DateTime.now().toIso8601String(),
+    }).eq('id', id);
+
+    await _client.from('activity_logs').insert({
+      'pesan': 'Status penarikan dana diperbarui menjadi $status',
+      'tipe': 'finance',
     });
   }
 }

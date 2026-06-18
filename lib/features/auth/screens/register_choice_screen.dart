@@ -1,79 +1,165 @@
 import 'package:flutter/material.dart';
-
-import 'package:bengkel/core/constants/app_colors.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'package:bengkel/features/auth/screens/register_partner_screen.dart';
 import 'package:bengkel/features/auth/screens/register_user_screen.dart';
-import 'package:bengkel/features/auth/widgets/auth_header.dart';
 
 class RegisterChoiceScreen extends StatelessWidget {
   const RegisterChoiceScreen({Key? key}) : super(key: key);
 
+  // Palet Warna Premium
+  final Color _primaryNavy = const Color(0xFF1E293B);
+  final Color _textMuted = const Color(0xFF64748B);
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppColors.background,
-      // ----------------------------------------------------
-      // TAMBAHAN: AppBar dengan tombol kembali ke Login
-      // ----------------------------------------------------
+      backgroundColor: Colors.white,
       appBar: AppBar(
-        backgroundColor: Colors.transparent,
+        backgroundColor: Colors.white,
         elevation: 0,
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: AppColors.secondary),
-          onPressed: () {
-            Navigator.pop(context); // Menutup halaman ini dan kembali ke LoginScreen
-          },
+          icon: Icon(Icons.arrow_back, color: _primaryNavy),
+          onPressed: () => Navigator.pop(context),
         ),
       ),
       body: SafeArea(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.symmetric(horizontal: 24.0),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              const AuthHeader(
-                title: 'Pilih Jenis Akun',
-                subtitle: 'Daftar sebagai pengguna biasa atau mitra bengkel',
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            return SingleChildScrollView(
+              padding: const EdgeInsets.symmetric(
+                horizontal: 24.0,
+                vertical: 20.0,
               ),
-              const SizedBox(height: 32),
-              _RoleCard(
-                title: 'Pengguna Biasa',
-                description:
-                    'Untuk pelanggan yang ingin beli sparepart, booking mekanik, dan akses fitur SOS.',
-                icon: Icons.person_outline,
-                onTap: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (context) => const RegisterUserScreen(),
-                    ),
-                  );
-                },
+              child: ConstrainedBox(
+                constraints: BoxConstraints(
+                  minHeight: constraints.maxHeight - 40,
+                ),
+                child: IntrinsicHeight(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      const SizedBox(height: 20),
+
+                      // --- LOGO & HEADER ---
+                      Center(
+                        child: Image.asset(
+                          'assets/images/logo_bengkel.png',
+                          height: 64,
+                          errorBuilder: (context, error, stackTrace) => Icon(
+                            Icons.directions_car,
+                            color: _primaryNavy,
+                            size: 64,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 24),
+                      Text(
+                        'BengkelKu',
+                        textAlign: TextAlign.center,
+                        style: GoogleFonts.plusJakartaSans(
+                          fontSize: 32,
+                          fontWeight: FontWeight.w900,
+                          color: _primaryNavy,
+                          letterSpacing: -1.0,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        'Platform Otomotif #1 di Indonesia',
+                        textAlign: TextAlign.center,
+                        style: GoogleFonts.plusJakartaSans(
+                          fontSize: 14,
+                          color: _textMuted,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                      const SizedBox(height: 48),
+
+                      Center(
+                        child: Text(
+                          'DAFTAR SEBAGAI',
+                          style: GoogleFonts.plusJakartaSans(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w800,
+                            color: _textMuted,
+                            letterSpacing: 2.0,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 24),
+
+                      // --- ROLE CARDS ---
+                      _RoleCard(
+                        title: 'Pelanggan',
+                        description: 'Cari bengkel & beli spare part',
+                        onTap: () {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (context) => const RegisterUserScreen(),
+                            ),
+                          );
+                        },
+                      ),
+                      const SizedBox(height: 16),
+
+                      _RoleCard(
+                        title: 'Mitra Bengkel',
+                        description: 'Kelola usaha bengkel & mekanik',
+                        onTap: () {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (context) =>
+                                  const RegisterPartnerScreen(),
+                            ),
+                          );
+                        },
+                      ),
+
+                      const SizedBox(height: 24),
+                      Text(
+                        '*Catatan: Admin hanya via seed DB. Mekanik didaftarkan oleh Mitra Bengkel.',
+                        textAlign: TextAlign.center,
+                        style: GoogleFonts.plusJakartaSans(
+                          color: const Color(0xFF94A3B8),
+                          fontSize: 11,
+                          fontStyle: FontStyle.italic,
+                        ),
+                      ),
+
+                      const Spacer(),
+                      const SizedBox(height: 32),
+
+                      // --- FOOTER S&K ---
+                      RichText(
+                        textAlign: TextAlign.center,
+                        text: TextSpan(
+                          style: GoogleFonts.plusJakartaSans(
+                            color: _textMuted,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w500,
+                          ),
+                          children: [
+                            const TextSpan(
+                              text: 'Dengan mendaftar, kamu setuju dengan ',
+                            ),
+                            TextSpan(
+                              text: 'Syarat & Ketentuan',
+                              style: GoogleFonts.plusJakartaSans(
+                                color: const Color(0xFF2563EB),
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
               ),
-              const SizedBox(height: 16),
-              _RoleCard(
-                title: 'Mitra Bengkel',
-                description:
-                    'Untuk bengkel yang ingin mendaftarkan outlet dan mengelola akses mekanik.',
-                icon: Icons.store_mall_directory_outlined,
-                onTap: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (context) => const RegisterPartnerScreen(),
-                    ),
-                  );
-                },
-              ),
-              const SizedBox(height: 24),
-              const Text(
-                'Catatan: admin hanya via seed akun, sedangkan mekanik hanya bisa dibuat dari akun bengkel.',
-                textAlign: TextAlign.center,
-                style: TextStyle(color: AppColors.textGrey),
-              ),
-              const SizedBox(height: 24), // Tambahan jarak bawah agar lebih lega
-            ],
-          ),
+            );
+          },
         ),
       ),
     );
@@ -83,71 +169,67 @@ class RegisterChoiceScreen extends StatelessWidget {
 class _RoleCard extends StatelessWidget {
   final String title;
   final String description;
-  final IconData icon;
   final VoidCallback onTap;
 
   const _RoleCard({
     required this.title,
     required this.description,
-    required this.icon,
     required this.onTap,
   });
 
   @override
   Widget build(BuildContext context) {
-    return Material(
-      color: AppColors.surface,
-      borderRadius: BorderRadius.circular(16),
-      child: InkWell(
+    return Container(
+      decoration: BoxDecoration(
+        color: const Color(0xFF1E293B), // Warna Navy Gelap
         borderRadius: BorderRadius.circular(16),
-        onTap: onTap,
-        child: Container(
-          padding: const EdgeInsets.all(20),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: AppColors.border),
+        boxShadow: [
+          BoxShadow(
+            color: const Color(0xFF1E293B).withOpacity(0.15),
+            blurRadius: 15,
+            offset: const Offset(0, 8),
           ),
-          child: Row(
-            children: [
-              Container(
-                width: 52,
-                height: 52,
-                decoration: BoxDecoration(
-                  color: AppColors.secondary.withOpacity(0.12),
-                  borderRadius: BorderRadius.circular(14),
-                ),
-                child: Icon(icon, color: AppColors.secondary),
-              ),
-              const SizedBox(width: 16),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      title,
-                      style: const TextStyle(
-                        color: AppColors.textDark,
-                        fontSize: 16,
-                        fontWeight: FontWeight.bold,
+        ],
+      ),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(16),
+          onTap: onTap,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        title,
+                        style: GoogleFonts.plusJakartaSans(
+                          color: Colors.white,
+                          fontSize: 17,
+                          fontWeight: FontWeight.bold,
+                        ),
                       ),
-                    ),
-                    const SizedBox(height: 6),
-                    Text(
-                      description,
-                      style: const TextStyle(
-                        color: AppColors.textGrey,
-                        height: 1.35,
+                      const SizedBox(height: 6),
+                      Text(
+                        description,
+                        style: GoogleFonts.plusJakartaSans(
+                          color: const Color(0xFF94A3B8),
+                          fontSize: 13,
+                        ),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
-              ),
-              const SizedBox(width: 8),
-              const Icon(
-                Icons.chevron_right_rounded,
-                color: AppColors.textGrey,
-              ),
-            ],
+                const Icon(
+                  Icons.chevron_right_rounded,
+                  color: Color(0xFF94A3B8),
+                  size: 28,
+                ),
+              ],
+            ),
           ),
         ),
       ),
